@@ -12,6 +12,7 @@ import { AlertDialog } from '../../../components/ui/Dialog';
 interface Student {
   id: string;
   name: string;
+  englishName?: string;
   parentNameArabic?: string;
   parentNameEnglish?: string;
   thirdName?: string;
@@ -55,6 +56,9 @@ const Students = () => {
 
   const { user } = useSupabaseAuth();
   const location = useLocation();
+  
+  // Check if user is backup account (read-only, no delete)
+  const isBackupAccount = user?.role === 'backupAccount';
 
   const [alertOpen, setAlertOpen] = useState(false);
   const [alertMessage, setAlertMessage] = useState('');
@@ -186,30 +190,32 @@ const Students = () => {
     setShowDeleteModal(true);
   };
 
-  // Confirm single student delete
-  const confirmDelete = async () => {
-    if (selectedStudent) {
+  // Confirm single student delete - OPTIMISTIC: UI updates instantly
+  const confirmDelete = () => {
+    if (!selectedStudent) return;
+    
+    const studentToDelete = selectedStudent;
+    
+    // STEP 1: Close modal and update UI IMMEDIATELY
+    setShowDeleteModal(false);
+    setStudents(prev => prev.filter(s => s.id !== studentToDelete.id));
+    setFilteredStudents(prev => prev.filter(s => s.id !== studentToDelete.id));
+    setSelectedStudent(null);
+    
+    // STEP 2: Delete from database in background
+    (async () => {
       try {
-        const response = await hybridApi.deleteStudent(selectedStudent.id);
-        
-        if (response.success) {
-          // Update the UI immediately
-          setStudents(prev => prev.filter(s => s.id !== selectedStudent.id));
-          setFilteredStudents(prev => prev.filter(s => s.id !== selectedStudent.id));
-          
-          setShowDeleteModal(false);
-          setSelectedStudent(null);
-        } else {
+        const response = await hybridApi.deleteStudent(studentToDelete.id);
+        if (!response.success) {
           console.error('Failed to delete student:', response.error);
-          setAlertMessage('حدث خطأ أثناء حذف الطالب');
-          setAlertOpen(true);
+          // Could show error toast here, but student is already removed from UI
+        } else {
+          console.log('[Delete] Student deleted successfully:', studentToDelete.id);
         }
       } catch (error) {
         console.error('Error deleting student:', error);
-        setAlertMessage('حدث خطأ أثناء حذف الطالب');
-        setAlertOpen(true);
       }
-    }
+    })();
   };
   
   // Toggle selection of a student
@@ -236,38 +242,47 @@ const Students = () => {
     setSelectAll(!selectAll);
   };
   
-  // Confirm bulk delete
-  const confirmBulkDelete = async () => {
+  // Confirm bulk delete - OPTIMISTIC: UI updates instantly, database in background
+  const confirmBulkDelete = () => {
     if (selectedStudents.length === 0) return;
     
-    try {
-      // Delete all selected students one by one
-      const deletePromises = selectedStudents.map(async (id) => {
-        const response = await hybridApi.deleteStudent(id);
-        if (!response.success) {
-          throw new Error(`Failed to delete student ${id}: ${response.error}`);
+    // Save count for message
+    const deleteCount = selectedStudents.length;
+    const idsToDelete = [...selectedStudents];
+    
+    // STEP 1: Close modal and update UI IMMEDIATELY (no waiting)
+    setShowBulkDeleteModal(false);
+    setStudents(prev => prev.filter(s => !idsToDelete.includes(s.id)));
+    setFilteredStudents(prev => prev.filter(s => !idsToDelete.includes(s.id)));
+    setSelectedStudents([]);
+    setSelectAll(false);
+    
+    // Show success message immediately
+    setAlertMessage(`تم حذف ${deleteCount} طالب بنجاح`);
+    setAlertOpen(true);
+    
+    // STEP 2: Process database deletions in background (fire and forget)
+    (async () => {
+      try {
+        console.log(`[BulkDelete] Starting background deletion of ${idsToDelete.length} students`);
+        
+        // Delete all in parallel
+        const deletePromises = idsToDelete.map(id => hybridApi.deleteStudent(id));
+        const results = await Promise.all(deletePromises);
+        
+        // Check for failures
+        const failures = results.filter(r => !r.success);
+        if (failures.length > 0) {
+          console.error(`[BulkDelete] ${failures.length} deletions failed:`, failures);
+        } else {
+          console.log(`[BulkDelete] All ${idsToDelete.length} students deleted successfully`);
         }
-        return response;
-      });
-      
-      await Promise.all(deletePromises);
-      
-      // Update the UI immediately
-      setStudents(prev => prev.filter(s => !selectedStudents.includes(s.id)));
-      setFilteredStudents(prev => prev.filter(s => !selectedStudents.includes(s.id)));
-      
-      // Reset selection state
-      setSelectedStudents([]);
-      setSelectAll(false);
-      setShowBulkDeleteModal(false);
-      
-      setAlertMessage(`تم حذف ${selectedStudents.length} طالب بنجاح`);
-      setAlertOpen(true);
-    } catch (error) {
-      console.error('Error bulk deleting students:', error);
-      setAlertMessage('حدث خطأ أثناء حذف الطلاب');
-      setAlertOpen(true);
-    }
+      } catch (error) {
+        console.error('[BulkDelete] Background deletion error:', error);
+        // Note: We don't rollback UI since data is already deleted from view
+        // User can refresh if needed
+      }
+    })();
   };
 
   
@@ -412,21 +427,25 @@ const Students = () => {
         
         {/* Action Buttons - RTL Layout */}
         <div className="flex flex-wrap gap-2 justify-start">
-          <Link
-            to="/school/students/new"
-            className="px-5 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-opacity-50 flex items-center gap-2 transition-all duration-200 shadow-md hover:shadow-lg"
-          >
-            <Plus size={18} />
-            <span className="font-medium">إضافة طالب</span>
-          </Link>
-          
-          <button
-            onClick={() => setImportDialogOpen(true)}
-            className="px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-opacity-50 flex items-center gap-2 transition-all duration-200 shadow-md hover:shadow-lg"
-          >
-            <Upload size={18} />
-            <span className="font-medium">استيراد متقدم</span>
-          </button>
+          {!isBackupAccount && (
+            <>
+              <Link
+                to="/school/students/new"
+                className="px-5 py-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-opacity-50 flex items-center gap-2 transition-all duration-200 shadow-md hover:shadow-lg"
+              >
+                <Plus size={18} />
+                <span className="font-medium">إضافة طالب</span>
+              </Link>
+              
+              <button
+                onClick={() => setImportDialogOpen(true)}
+                className="px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-opacity-50 flex items-center gap-2 transition-all duration-200 shadow-md hover:shadow-lg"
+              >
+                <Upload size={18} />
+                <span className="font-medium">استيراد متقدم</span>
+              </button>
+            </>
+          )}
           <button
             onClick={handleExportStudentTemplate}
             className="px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-opacity-50 flex items-center gap-2 transition-all duration-200 shadow-md hover:shadow-lg"
@@ -532,8 +551,8 @@ const Students = () => {
         </div>
       </div>
       
-      {/* Bulk Actions */}
-      {selectedStudents.length > 0 && (
+      {/* Bulk Actions - Hidden for backup account */}
+      {selectedStudents.length > 0 && !isBackupAccount && (
         <div className="bg-gray-100 p-3 rounded-md flex justify-between items-center">
           <div>
             <span className="font-medium">تم تحديد {selectedStudents.length} طالب</span>
@@ -631,20 +650,24 @@ const Students = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     <div className="flex items-center space-x-3 rtl:space-x-reverse">
-                      <Link
-                        to={`/school/students/${student.id}`}
-                        className="text-[#800000] hover:text-[#600000]"
-                        title="تعديل"
-                      >
-                        <Edit size={18} />
-                      </Link>
-                      <button
-                        onClick={() => handleDelete(student)}
-                        className="text-red-600 hover:text-red-900"
-                        title="حذف"
-                      >
-                        <Trash size={18} />
-                      </button>
+                      {!isBackupAccount && (
+                        <>
+                          <Link
+                            to={`/school/students/${student.id}`}
+                            className="text-[#800000] hover:text-[#600000]"
+                            title="تعديل"
+                          >
+                            <Edit size={18} />
+                          </Link>
+                          <button
+                            onClick={() => handleDelete(student)}
+                            className="text-red-600 hover:text-red-900"
+                            title="حذف"
+                          >
+                            <Trash size={18} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>

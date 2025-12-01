@@ -525,6 +525,8 @@ export const parseCSV = (text: string): Array<any> => {
     'نسبة خصم الرسوم': 'tuitionDiscountPercentage',
     'نوع الرسوم المدمجة': 'combinedFeeType',  // Keep this for backward compatibility
     'رسوم مدمجة': 'combinedFees',  // Add new mapping for yes/no field
+    'دمج النقل في الأقساط': 'includeTransportInInstallments',  // NEW: Include transportation in installments only
+    'Include Transport In Installments': 'includeTransportInInstallments',
     
     // Installment headers
     'رقم القسط': 'installmentNumber',
@@ -622,6 +624,8 @@ export const processImportedStudents = (
     'خصم الرسوم الدراسية': 'tuitionDiscount',
     'نوع الرسوم المدمجة': 'combinedFeeType',
     'رسوم مدمجة': 'combinedFees',
+    'دمج النقل في الأقساط': 'includeTransportInInstallments',  // NEW: Include transportation in installments only
+    'Include Transport In Installments': 'includeTransportInInstallments',
     'المبلغ المدفوع': 'paidAmount',
     'عدد الأقساط': 'numberOfInstallments',
     'تاريخ بداية الأقساط': 'installmentStartDate',
@@ -719,6 +723,14 @@ export const processImportedStudents = (
       if (!hasCombinedFees && mappedRow.combinedFeeType) {
         const typeText = String(mappedRow.combinedFeeType).trim().toLowerCase();
         hasCombinedFees = typeText.includes('transportation_and_tuition') || typeText.includes('combined');
+      }
+      
+      // NEW: Determine if transportation should be included in installments only
+      // This keeps fees separate but combines them for installment calculations
+      let includeTransportInInstallments = false;
+      if (mappedRow.includeTransportInInstallments !== undefined) {
+        const flagText = String(mappedRow.includeTransportInInstallments).trim().toLowerCase();
+        includeTransportInInstallments = ['yes','true','نعم','1','y'].includes(flagText);
       }
 
       // Process transportation
@@ -821,28 +833,29 @@ export const processImportedStudents = (
       
       // Create fees based on student data
       
-      // 1. Tuition fee (skip if combined fees are enabled)
-      if (student.tuitionFee && !hasCombinedFees) {
-        // Map payment method from Arabic to English if needed
-        let paymentMethodValue = mappedRow.paymentMethod;
-        
-        if (paymentMethodValue) {
-          // Convert to string and lowercase for comparison
-          const paymentMethodText = String(paymentMethodValue).trim().toLowerCase();
-          
-          // Check for Arabic payment terms using constants
-          const arabicToEnglishPayment = new Map(
-            PAYMENT_METHODS.map(method => [method.name.toLowerCase(), method.id])
-          );
-          
-          // Try to match with Arabic terms from constants
-          const paymentMethod = arabicToEnglishPayment.get(paymentMethodText);
-          if (paymentMethod) {
-            paymentMethodValue = paymentMethod;
-          }
-          // If no match, keep the original value
+      // Map payment method from Arabic to English if needed (used by all fee types)
+      let paymentMethodValue = mappedRow.paymentMethod;
+      if (paymentMethodValue) {
+        const paymentMethodText = String(paymentMethodValue).trim().toLowerCase();
+        const arabicToEnglishPayment = new Map(
+          PAYMENT_METHODS.map(method => [method.name.toLowerCase(), method.id])
+        );
+        const paymentMethod = arabicToEnglishPayment.get(paymentMethodText);
+        if (paymentMethod) {
+          paymentMethodValue = paymentMethod;
         }
-        
+      }
+      
+      // Check if we need to create installments
+      const numberOfInstallments = mappedRow.numberOfInstallments ? parseInt(mappedRow.numberOfInstallments, 10) : 0;
+      const installmentStartDate = mappedRow.installmentStartDate || new Date().toISOString().split('T')[0];
+      
+      // 1. Tuition fee handling - depends on fee combination mode
+      // Skip ONLY if combined fees are enabled (handled separately below)
+      // When includeTransportInInstallments is enabled, we still create tuition fee but installments include transport
+      const skipTuitionFee = hasCombinedFees;
+      
+      if (student.tuitionFee && !skipTuitionFee) {
         // Calculate paid amount for this fee from CSV
         const paidAmountFromCSV = parseFloat(mappedRow.paidAmount) || 0;
         const feeAmount = Math.round(student.tuitionFee);
@@ -870,55 +883,41 @@ export const processImportedStudents = (
           paid: feePaidAmount,
           balance: feeBalance - feePaidAmount,
           status: feeStatus,
-          dueDate: safeToISODateString(new Date()), // Today as default
+          dueDate: safeToISODateString(new Date()),
           paymentMethod: paymentMethodValue as 'cash' | 'visa' | 'check' | 'bank-transfer' | 'other',
           paymentNote: mappedRow.paymentNote
         };
         fees.push(tuitionFee);
         
-        // Check if we need to create installments
-        const numberOfInstallments = mappedRow.numberOfInstallments ? parseInt(mappedRow.numberOfInstallments, 10) : 0;
-        
+        // Create installments - check if transport should be included
         if (numberOfInstallments > 0) {
-          // Create installments
-          const installmentStartDate = mappedRow.installmentStartDate || new Date().toISOString().split('T')[0];
+          // Determine if transport should be included in installments
+          const includeTransport = includeTransportInInstallments && (student.transportationFee || 0) > 0;
+          const totalAmount = includeTransport 
+            ? (student.tuitionFee + (student.transportationFee || 0)) - (student.tuitionDiscount || 0)
+            : student.tuitionFee - (student.tuitionDiscount || 0);
+          // IMPORTANT: Always use 'tuition' as feeType so installments link to the tuition fee
+          // The note will indicate if transport is included
+          const installmentFeeType = 'tuition';
+          const installmentNote = includeTransport ? '(شامل النقل)' : '';
           
-          // Check if we need to use combined fee type (support both old and new format)
-          const useCombinedFeeType = 
-            mappedRow.combinedFeeType === 'transportation_and_tuition' || 
-            mappedRow.combinedFees === 'نعم' || 
-            mappedRow.combinedFees === 'yes' || 
-            mappedRow.combinedFees === 'true' || 
-            mappedRow.combinedFees === '1';
-          
-          // Calculate the total amount based on fee type
-          let totalAmount = student.tuitionFee - (student.tuitionDiscount || 0);
-          let feeType = 'tuition';
-          
-          // If using combined fee type, add transportation fee to the total
-          if (useCombinedFeeType) {
-            totalAmount += student.transportationFee || 0;
-            feeType = 'transportation_and_tuition';
-            console.log(`Using combined fee type for ${student.name}: Tuition ${student.tuitionFee} + Transportation ${student.transportationFee} = ${totalAmount}`);
-          }
-          
-          // Check if there's a pre-paid amount
           const paidAmount = parseFloat(mappedRow.paidAmount) || 0;
           let remainingAmount = totalAmount - paidAmount;
           
+          if (includeTransport) {
+            console.log(`Creating installments with transport for ${student.name}: Total ${totalAmount} (Tuition ${student.tuitionFee} + Transport ${student.transportationFee})`);
+          }
+          
           // If there's a pre-payment, create a paid installment for it
           if (paidAmount > 0) {
-            console.log(`Pre-payment detected for ${student.name}: ${paidAmount}`);
-            
-            // Create a paid installment for the pre-payment
             const paidInstallment: ImportedInstallment = {
               studentId: student.studentId,
-              feeType: feeType,
+              feeType: installmentFeeType,
               amount: Math.round(paidAmount),
               dueDate: safeToISODateString(parseDateString(installmentStartDate)),
               installmentNumber: 0,
               totalInstallments: numberOfInstallments,
-              note: `دفعة مقدمة`,
+              note: `دفعة مقدمة ${installmentNote}`,
               installmentMonth: String(parseDateString(installmentStartDate).getMonth() + 1),
               isPaid: true,
               paidDate: safeToISODateString(new Date()),
@@ -927,63 +926,46 @@ export const processImportedStudents = (
               paymentNote: mappedRow.paymentNote,
               checkNumber: mappedRow.checkNumber
             };
-            
             installments.push(paidInstallment);
             
-            // If the pre-payment covers the entire amount, we're done
             if (paidAmount >= totalAmount) {
               console.log(`Full pre-payment for ${student.name}: ${paidAmount} >= ${totalAmount}`);
-              return;
             }
           }
           
-          // Calculate installment amounts for the remaining balance
-          const installmentAmount = Math.floor(remainingAmount / numberOfInstallments);
-          const remainder = remainingAmount % numberOfInstallments;
-          
-          // Get installment interval (default to 1 month)
-          const installmentInterval = mappedRow.installmentInterval ? parseInt(mappedRow.installmentInterval, 10) : 1;
-          
-          // Create installments for the remaining balance
-          for (let i = 0; i < numberOfInstallments; i++) {
-            // Calculate installment amount (add remainder to first installment)
-            const amount = i === 0 ? installmentAmount + remainder : installmentAmount;
+          if (remainingAmount > 0) {
+            const installmentAmount = Math.floor(remainingAmount / numberOfInstallments);
+            const remainder = remainingAmount % numberOfInstallments;
+            const installmentInterval = mappedRow.installmentInterval ? parseInt(mappedRow.installmentInterval, 10) : 1;
             
-            // Calculate due date (first installment is on start date, others based on interval)
-            // Use parseDateString to properly handle DD/MM/YYYY format from CSV
-            const dueDate = parseDateString(installmentStartDate);
-            dueDate.setMonth(dueDate.getMonth() + (i * installmentInterval));
-            
-            // Determine month name
-            const monthNames = [
-              'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-              'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
-            ];
-            const installmentMonth = monthNames[dueDate.getMonth()];
-            
-            // Create installment
-            const installment: ImportedInstallment = {
-              studentId: student.studentId,
-              feeType: feeType,  // Use the determined fee type
-              amount: Math.round(amount),
-              dueDate: safeToISODateString(dueDate),
-              installmentNumber: i,
-              totalInstallments: numberOfInstallments,
-              installmentInterval: installmentInterval, // Store the interval
-              note: `القسط ${i + 1} من ${numberOfInstallments}`,
-              installmentMonth,
-              paymentMethod: mappedRow.paymentMethod as 'cash' | 'visa' | 'check' | 'bank-transfer' | 'other',
-              paymentNote: mappedRow.paymentNote,
-              checkNumber: mappedRow.checkNumber
-            };
-            
-            installments.push(installment);
-            
-            console.log(`Created installment for ${student.name}: ${installmentMonth} - ${amount} - Fee Type: ${feeType}`);
+            for (let i = 0; i < numberOfInstallments; i++) {
+              const amount = i === 0 ? installmentAmount + remainder : installmentAmount;
+              const dueDate = parseDateString(installmentStartDate);
+              dueDate.setMonth(dueDate.getMonth() + (i * installmentInterval));
+              
+              const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+              const installmentMonth = monthNames[dueDate.getMonth()];
+              
+              const installment: ImportedInstallment = {
+                studentId: student.studentId,
+                feeType: installmentFeeType,
+                amount: Math.round(amount),
+                dueDate: safeToISODateString(dueDate),
+                installmentNumber: i,
+                totalInstallments: numberOfInstallments,
+                installmentInterval: installmentInterval,
+                note: `القسط ${i + 1} من ${numberOfInstallments} ${installmentNote}`,
+                installmentMonth,
+                paymentMethod: mappedRow.paymentMethod as 'cash' | 'visa' | 'check' | 'bank-transfer' | 'other',
+                paymentNote: mappedRow.paymentNote,
+                checkNumber: mappedRow.checkNumber
+              };
+              installments.push(installment);
+            }
           }
         }
       }
-
+      
       // 2. Combined fee (transportation + tuition) when requested
       if (hasCombinedFees) {
         const combinedAmount = Math.round((student.tuitionFee || 0) + (student.transportationFee || 0));
@@ -1048,8 +1030,13 @@ export const processImportedStudents = (
         }
       }
       
-      // 2. Transportation fee
-      if (student.transportation !== 'none') {
+      // 3. Transportation fee
+      // Skip creating separate transportation fee ONLY if combined fees are enabled
+      // When includeTransportInInstallments is enabled, we still create the transportation fee for tracking
+      // but the installments will include the transport amount
+      const skipSeparateTransportFee = hasCombinedFees;
+      
+      if (student.transportation !== 'none' && !skipSeparateTransportFee) {
         // ALWAYS use the exact transportation fee specified for the student
         // Never override with default values if a custom value was provided
         const transportFee = student.transportationFee !== undefined ? 
@@ -1070,6 +1057,8 @@ export const processImportedStudents = (
           paymentNote: mappedRow.paymentNote
         };
         fees.push(transportationFee);
+      } else if (student.transportation !== 'none' && skipSeparateTransportFee) {
+        console.log(`Skipping separate transportation fee for ${student.name} - included in combined fees`);
       } else if (mappedRow.transportationFee) {
         // If transportation fee is provided but no transportation type is set,
         // create a transportation fee anyway and set transportation to one-way
@@ -2413,6 +2402,10 @@ export const generateStudentTemplateCSV = (): string => {
   const BOM = "\uFEFF";
   
   // Define headers
+  // Fee Options Explained:
+  // 1. "رسوم مدمجة" = نعم: Combines tuition + transportation into ONE fee record (transportation_and_tuition)
+  // 2. "دمج النقل في الأقساط" = نعم: Keeps fees SEPARATE but includes transportation in installment calculations
+  // 3. Both empty: Normal separate fees with separate installments for each
   const headers = [
     'الاسم الكامل',
     'Student English Name',  // Add English name column
@@ -2428,8 +2421,9 @@ export const generateStudentTemplateCSV = (): string => {
     'رسوم النقل', // Added transportation fees column
     'الرسوم الدراسية',
     'خصم الرسوم الدراسية',
-    'رسوم مدمجة',  // RENAMED: Simple yes/no field for combined fees
-    'المبلغ المدفوع',  // NEW: Paid amount column
+    'رسوم مدمجة',  // Combines fees into ONE record (transportation_and_tuition type)
+    'دمج النقل في الأقساط',  // NEW: Keep fees separate but include transport in installments (نعم/لا)
+    'المبلغ المدفوع',  // Paid amount column
     'عدد الأقساط',  // Number of installments - IMPORTANT
     'تاريخ بداية الأقساط',  // Start date for installments - IMPORTANT
     'فترة الأقساط',  // Installment interval in months (1=monthly, 2=every 2 months, etc.)
@@ -2448,9 +2442,9 @@ export const generateStudentTemplateCSV = (): string => {
   const visaPaymentArabic = PAYMENT_METHODS.find(p => p.id === 'visa')?.name || 'بطاقة ائتمان';
   const checkPaymentArabic = PAYMENT_METHODS.find(p => p.id === 'check')?.name || 'شيك';
   
-  // Create empty template data
+  // Create empty template data (23 columns to match headers)
   const exampleRows = [
-    ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']
+    ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']
   ];
   
   // Join headers and rows

@@ -381,6 +381,17 @@ const ImportDialog = ({
             </ul>
           </div>
           
+          {importType === 'students' && (
+            <div className="bg-amber-50 border border-amber-200 rounded-md p-4 text-amber-800">
+              <h4 className="font-bold mb-2">خيارات دمج الرسوم والنقل:</h4>
+              <ul className="list-disc list-inside space-y-1 text-sm">
+                <li><strong>رسوم مدمجة = نعم:</strong> يدمج الرسوم الدراسية والنقل في سجل رسوم واحد</li>
+                <li><strong>دمج النقل في الأقساط = نعم:</strong> يبقي الرسوم منفصلة لكن يضيف النقل لحساب الأقساط</li>
+                <li><strong>كلاهما فارغ:</strong> رسوم منفصلة وأقساط منفصلة لكل نوع</li>
+              </ul>
+            </div>
+          )}
+          
           <div className="flex gap-4">
             <button
               type="button"

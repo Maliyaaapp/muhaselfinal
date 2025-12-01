@@ -362,6 +362,7 @@ const InstallmentForm = () => {
       'books': 'كتب',
       'other': 'رسوم أخرى',
       'transportation_and_tuition': 'رسوم مدمجة',
+      'tuition_with_transport': 'رسوم دراسية مع النقل',
     };
     
     return feeTypes[type] || type;

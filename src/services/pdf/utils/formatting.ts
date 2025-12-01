@@ -55,6 +55,11 @@ export const translateFeeType = (feeType: string): string => {
     // Match constants: رسوم مدمجة
     return 'رسوم مدمجة';
   }
+  
+  // Handle tuition with transport (installments include transport)
+  if (feeType.toLowerCase() === 'tuition_with_transport') {
+    return 'رسوم دراسية مع النقل';
+  }
 
   // Handle common variations of transportation fees
   const transportationTerms = [

@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Plus, Edit, Filter, CreditCard, Check, MessageSquare, Download, User, Trash2, Eye, Info, Clock } from 'lucide-react';
+import { Plus, Edit, Filter, CreditCard, Check, MessageSquare, Download, User, Trash2, Eye, Info, Clock, RefreshCw } from 'lucide-react';
 import { useSupabaseAuth } from '../../../contexts/SupabaseAuthContext';
 import { CURRENCY as CURRENCY_SYMBOL } from '../../../utils/constants';
 import hybridApi, { startBulkOperation, endBulkOperation } from '../../../services/hybridApi';
+import { usePaymentListener } from '../../../hooks/usePaymentListener';
+import { emitInstallmentPayment, isRefreshNeeded, clearRefreshNeeded } from '../../../utils/paymentEvents';
 import { Template } from '../../../services/dataStore';
 import pdfPrinter from '../../../services/pdfPrinter';
 import { exportInstallmentsToCSV } from '../../../services/importExport';
@@ -57,7 +59,8 @@ const getFeeTypeLabel = (type: string): string => {
     'uniform': 'زي مدرسي',
     'books': 'كتب',
     'other': 'رسوم أخرى',
-    'transportation_and_tuition': 'رسوم مدمجة'
+    'transportation_and_tuition': 'رسوم مدمجة',
+    'tuition_with_transport': 'رسوم دراسية مع النقل'
   };
   
   return feeTypes[type] || type;
@@ -272,6 +275,10 @@ interface InstallmentsReportData {
 const Installments = () => {
   const { user } = useSupabaseAuth();
   const location = useLocation();
+  
+  // Check if user is backup account (read-only, no delete)
+  const isBackupAccount = user?.role === 'backupAccount';
+  
   const [installments, setInstallments] = useState<Installment[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [settings, setSettings] = useState<any>(null);
@@ -367,6 +374,51 @@ const Installments = () => {
   const [alertOpen, setAlertOpen] = useState(false);
   const [alertMessage, setAlertMessage] = useState('');
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [isRefreshingFromPayment, setIsRefreshingFromPayment] = useState(false);
+  
+  // Ref to hold fetchInstallments function for payment listener
+  const fetchInstallmentsRef = useRef<(() => Promise<void>) | null>(null);
+
+  // 🔔 PAYMENT EVENT LISTENER - Auto-refresh when payments are made on Fees page
+  // This callback uses a ref to access fetchInstallments (defined later)
+  const handlePaymentRefresh = useCallback(async () => {
+    console.log('[Installments] 🔄 Payment event received - starting refresh...');
+    setIsRefreshingFromPayment(true);
+    
+    try {
+      // Clear cache first to ensure fresh data
+      console.log('[Installments] 🗑️ Invalidating installments cache...');
+      hybridApi.invalidateCache('installments');
+      hybridApi.invalidateCache('fees');
+      
+      // Small delay to let database settle
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Fetch fresh data using ref
+      console.log('[Installments] 📥 Fetching fresh data...');
+      if (fetchInstallmentsRef.current) {
+        await fetchInstallmentsRef.current();
+        console.log('[Installments] ✅ Data refreshed successfully!');
+      } else {
+        console.warn('[Installments] ⚠️ fetchInstallments not available yet');
+      }
+    } catch (error) {
+      console.error('[Installments] ❌ Error refreshing after payment:', error);
+    } finally {
+      setIsRefreshingFromPayment(false);
+    }
+  }, []); // No dependencies - uses refs
+
+  // Subscribe to payment events
+  usePaymentListener({
+    schoolId: user?.schoolId,
+    onRefresh: handlePaymentRefresh,
+    debounceMs: 150,
+    enabled: true,
+    onPaymentEvent: (event) => {
+      console.log('[Installments] 📬 Received payment event:', event.type);
+    },
+  });
 
   // Fetch school settings
   const fetchSettings = async () => {
@@ -384,6 +436,7 @@ const Installments = () => {
 
   // Move fetchInstallments outside useEffect to make it reusable
   const fetchInstallments = async () => {
+    console.log('[Installments] fetchInstallments called');
     setIsLoading(true);
     
     try {
@@ -516,11 +569,41 @@ const Installments = () => {
     }
   };
 
+  // Store fetchInstallments in ref for payment listener to access
+  useEffect(() => {
+    fetchInstallmentsRef.current = fetchInstallments;
+  }, [user?.schoolId, user?.role, user?.gradeLevels]);
+
   // Update useEffect to use the function
   useEffect(() => {
-    // Initial fetch - cache invalidation is now handled properly in hybridApi
-    fetchInstallments();
-    fetchSettings();
+    // Check if refresh was requested while component was unmounted
+    const refreshTimestamp = isRefreshNeeded('installments');
+    // Check if refresh was requested while component was unmounted
+    const doFetch = async () => {
+      if (refreshTimestamp) {
+        console.log('[Installments] 🔄 Refresh was requested at', new Date(refreshTimestamp).toISOString());
+        
+        // Clear the flag BEFORE fetching to prevent loops
+        clearRefreshNeeded('installments');
+        
+        // CRITICAL: Wait for database to fully commit before fetching
+        // This ensures we don't read stale cached data
+        console.log('[Installments] ⏳ Waiting 800ms for database to commit...');
+        await new Promise(resolve => setTimeout(resolve, 800));
+        
+        // Clear ALL caches to force fresh fetch from Supabase
+        console.log('[Installments] 🗑️ Clearing all caches...');
+        hybridApi.invalidateCache('installments');
+        hybridApi.invalidateCache('fees');
+        await hybridApi.clearCache();
+      }
+      
+      // Fetch data
+      await fetchInstallments();
+      fetchSettings();
+    };
+    
+    doFetch();
     
     // Note: hybridApi doesn't have a subscription mechanism like dataStore
     // Data will be refreshed when component mounts or when operations are performed
@@ -1011,6 +1094,16 @@ const Installments = () => {
       // CRITICAL: Invalidate fees cache so Fees page shows updated data
       hybridApi.invalidateCache('fees');
       hybridApi.invalidateCache('installments');
+      
+      // 🔔 EMIT INSTALLMENT PAYMENT EVENT - Other pages will auto-refresh
+      emitInstallmentPayment({
+        installmentId: id,
+        feeId: installment.feeId,
+        studentId: installment.studentId,
+        amountPaid: paymentAmount,
+        schoolId: user?.schoolId,
+      });
+      console.log('[Installments] Payment event emitted');
       
       // Reset payment fields after successful payment
       setPaymentMethod('cash');
@@ -1938,6 +2031,13 @@ const Installments = () => {
   };
 
   const handleDeleteStudent = async (studentId: string) => {
+    // Prevent delete for backup account
+    if (isBackupAccount) {
+      setAlertMessage('ليس لديك صلاحية الحذف');
+      setAlertOpen(true);
+      return;
+    }
+    
     if (!window.confirm('هل أنت متأكد من حذف جميع أقساط هذا الطالب؟')) return;
     
     try {
@@ -2144,6 +2244,13 @@ const Installments = () => {
 
   // Update the handleDeleteInstallment function
   const handleDeleteInstallment = async (id: string) => {
+    // Prevent delete for backup account
+    if (isBackupAccount) {
+      setAlertMessage('ليس لديك صلاحية الحذف');
+      setAlertOpen(true);
+      return;
+    }
+    
     if (!window.confirm('هل أنت متأكد من حذف هذا القسط؟')) return;
     
     try {

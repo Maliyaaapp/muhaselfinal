@@ -55,7 +55,7 @@ const Communications = () => {
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
 
-  const getFeeTypeLabel = (type: string) => { if (!type) return ''; if (type === 'transportation_and_tuition') return 'رسوم مدمجة'; if (type === 'tuition') return 'رسوم دراسية'; if (type === 'transportation') return 'نقل مدرسي'; return type; };
+  const getFeeTypeLabel = (type: string) => { if (!type) return ''; if (type === 'transportation_and_tuition') return 'رسوم مدمجة'; if (type === 'tuition_with_transport') return 'رسوم دراسية مع النقل'; if (type === 'tuition') return 'رسوم دراسية'; if (type === 'transportation') return 'نقل مدرسي'; return type; };
   const getInstallmentStatusLabel = (status: string) => { switch (status) { case 'paid': return 'مدفوع'; case 'partial': return 'جزئي'; case 'upcoming': return 'قادم'; case 'overdue': return 'متأخر'; default: return status; } };
   const getInstallmentStatusColor = (status: string) => { switch (status) { case 'paid': return 'bg-emerald-100 text-emerald-700'; case 'partial': return 'bg-amber-100 text-amber-700'; case 'upcoming': return 'bg-blue-100 text-blue-700'; case 'overdue': return 'bg-red-100 text-red-700'; default: return 'bg-gray-100 text-gray-700'; } };
   

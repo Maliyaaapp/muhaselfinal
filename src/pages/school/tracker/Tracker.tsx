@@ -172,6 +172,7 @@ const Tracker = () => {
       case 'tuition': return 'رسوم دراسية';
       case 'transportation': return 'نقل مدرسي';
       case 'transportation_and_tuition': return 'رسوم دراسية ونقل';
+      case 'tuition_with_transport': return 'رسوم دراسية مع النقل';
       case 'activities': return 'أنشطة';
       case 'books': return 'كتب';
       case 'uniform': return 'زي مدرسي';

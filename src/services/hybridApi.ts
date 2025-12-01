@@ -1125,7 +1125,7 @@ export const getById = async (table: string, id: string): Promise<ApiResponse> =
   }
 };
 
-// Create a new item
+// Create a new item - LOCAL-FIRST: Saves locally immediately, syncs in background
 export const create = async (table: string, data: any): Promise<ApiResponse> => {
   try {
     // Validate UUID fields for installments table specifically
@@ -1152,12 +1152,55 @@ export const create = async (table: string, data: any): Promise<ApiResponse> => 
       updated_at: new Date().toISOString()
     };
 
-    console.log(`create - About to insert into ${table}:`, {
-      schoolId: itemData.school_id,
-      itemId: itemData.id,
-      usingSupabase: shouldUseSupabase()
-    });
-
+    // STEP 1: Save to localStorage IMMEDIATELY (no waiting)
+    const items = getCollection(table);
+    items.push(itemData);
+    saveCollection(table, items);
+    
+    // STEP 2: Update cache immediately for instant UI updates
+    try {
+      const cached = getCachedCollection(table);
+      if (cached && cached.data) {
+        const updatedData = [...cached.data, itemData];
+        saveCachedCollection(table, updatedData);
+      } else {
+        saveCachedCollection(table, [itemData]);
+      }
+      invalidateFilteredCaches(table);
+    } catch (cacheError) {
+      console.warn('Cache update failed after create:', cacheError);
+    }
+    
+    console.log(`✅ [LocalFirst] Created ${itemData.id} in ${table} locally`);
+    
+    // STEP 3: Sync to Supabase in BACKGROUND (fire and forget)
+    (async () => {
+      try {
+        const isOnline = await isSupabaseAvailable();
+        if (isOnline && shouldUseSupabase()) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            const { error } = await supabase.from(table).upsert(itemData, { onConflict: 'id' });
+            if (error) {
+              console.error(`[BackgroundSync] Failed to create in ${table}:`, error);
+              addToSyncQueue(table, 'create', itemData);
+            } else {
+              console.log(`✅ [BackgroundSync] Created ${itemData.id} in ${table} in Supabase`);
+            }
+          }
+        } else {
+          addToSyncQueue(table, 'create', itemData);
+        }
+      } catch (bgError) {
+        console.error(`[BackgroundSync] Error creating:`, bgError);
+        addToSyncQueue(table, 'create', itemData);
+      }
+    })();
+    
+    // Return success immediately with local data
+    return { success: true, data: itemData };
+    
+    // LEGACY CODE BELOW - kept for reference but not executed
     const isOnline = await isSupabaseAvailable();
     
     if (isOnline && shouldUseSupabase()) {
@@ -1353,7 +1396,7 @@ export const create = async (table: string, data: any): Promise<ApiResponse> => 
   }
 };
 
-// Update an existing item
+// Update an existing item - LOCAL-FIRST: Updates locally immediately, syncs in background
 export const update = async (table: string, id: string, data: any): Promise<ApiResponse> => {
   try {
     // Add updated_at timestamp and increment version for optimistic locking
@@ -1363,74 +1406,65 @@ export const update = async (table: string, id: string, data: any): Promise<ApiR
       version: (data.version || 0) + 1
     };
 
+    // STEP 1: Update localStorage IMMEDIATELY (no waiting)
+    const items = getCollection(table);
+    const index = items.findIndex(i => i.id === id);
+    
+    if (index === -1) {
+      return { success: false, error: `Item not found in ${table}` };
+    }
+    
+    const updatedItem = { ...items[index], ...updateData };
+    items[index] = updatedItem;
+    saveCollection(table, items);
+    
+    // STEP 2: Update cache immediately for instant UI updates
+    try {
+      const cached = getCachedCollection(table);
+      if (cached && cached.data) {
+        const updatedCacheData = cached.data.map(item => 
+          item.id === id ? updatedItem : item
+        );
+        saveCachedCollection(table, updatedCacheData);
+      }
+      invalidateFilteredCaches(table);
+    } catch (cacheError) {
+      console.warn('Cache update failed after update:', cacheError);
+    }
+    
+    console.log(`✅ [LocalFirst] Updated ${id} in ${table} locally`);
+    
+    // STEP 3: Sync to Supabase in BACKGROUND (fire and forget)
+    (async () => {
+      try {
+        const isOnline = await isSupabaseAvailable();
+        if (isOnline && shouldUseSupabase()) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            const { error } = await supabase.from(table).update(updateData).eq('id', id);
+            if (error) {
+              console.error(`[BackgroundSync] Failed to update ${id} in ${table}:`, error);
+              addToSyncQueue(table, 'update', updatedItem);
+            } else {
+              console.log(`✅ [BackgroundSync] Updated ${id} in ${table} in Supabase`);
+            }
+          }
+        } else {
+          addToSyncQueue(table, 'update', updatedItem);
+        }
+      } catch (bgError) {
+        console.error(`[BackgroundSync] Error updating:`, bgError);
+        addToSyncQueue(table, 'update', updatedItem);
+      }
+    })();
+    
+    // Return success immediately with local data
+    return { success: true, data: updatedItem };
+    
+    // LEGACY CODE BELOW - kept for reference but not executed
     const isOnline = await isSupabaseAvailable();
     
     if (isOnline && shouldUseSupabase()) {
-      // Check authentication before attempting to update
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !session) {
-        console.error('Authentication required for database operations');
-        return { success: false, error: 'Authentication required. Please log in again.' };
-      }
-      
-      // First, get the current record to check version for optimistic locking
-      const { data: currentRecord, error: fetchError } = await supabase
-        .from(table)
-        .select('version, updated_at')
-        .eq('id', id)
-        .single();
-
-      if (fetchError && fetchError.code !== 'PGRST116') {
-        console.error(`Error fetching current record for version check:`, fetchError);
-        // Continue with update without version check if fetch fails
-      } else if (currentRecord && data.version !== undefined) {
-        // Check for version conflict (optimistic locking)
-        if (currentRecord.version && currentRecord.version !== data.version) {
-          return {
-            success: false,
-            error: `Version conflict: Record has been modified by another user. Please refresh and try again.`,
-            details: {
-              type: 'VERSION_CONFLICT',
-              currentVersion: currentRecord.version,
-              attemptedVersion: data.version
-            }
-          };
-        }
-      }
-      
-      const { data: result, error } = await supabase.from(table).update(updateData).eq('id', id).select();
-      if (error) {
-        // Handle RLS policy violations specifically
-        if (error.code === '42501' || error.message?.includes('row-level security')) {
-          return { 
-            success: false, 
-            error: 'Permission denied. Please ensure you are logged in and have access to this school\'s data.',
-            details: error
-          };
-        }
-        throw error;
-      }
-      
-      // Update cache with modified item
-      try {
-        const cached = getCachedCollection(table);
-        if (cached && cached.data) {
-          const updatedData = cached.data.map(item => 
-            item.id === id ? result[0] : item
-          );
-          saveCachedCollection(table, updatedData);
-          console.log(`✅ Updated cache for ${table} after update`);
-        }
-        
-        // CRITICAL FIX: Also invalidate filtered caches to ensure consistency
-        // This ensures queries with filters (like schoolId) get fresh data
-        invalidateFilteredCaches(table);
-      } catch (cacheError) {
-        console.warn('Cache update failed after update:', cacheError);
-      }
-      
-      return { success: true, data: result[0] };
-    } else {
       // Fallback to localStorage
       await simulateDelay();
       const items = getCollection(table);
@@ -1526,75 +1560,56 @@ export const update = async (table: string, id: string, data: any): Promise<ApiR
   }
 };
 
-// Delete an item
+// Delete an item - LOCAL-FIRST: Deletes locally immediately, syncs in background
 export const remove = async (table: string, id: string): Promise<ApiResponse> => {
   try {
-    const isOnline = await isSupabaseAvailable();
+    // STEP 1: Delete from local storage IMMEDIATELY (no waiting)
+    const items = getCollection(table);
+    const filteredItems = items.filter(i => i.id !== id);
+    saveCollection(table, filteredItems);
     
-    if (isOnline && shouldUseSupabase()) {
-      // Check authentication before attempting to delete
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !session) {
-        console.error('Authentication required for database operations');
-        return { success: false, error: 'Authentication required. Please log in again.' };
+    // STEP 2: Update cache immediately for instant UI updates
+    try {
+      const cached = getCachedCollection(table);
+      if (cached && cached.data) {
+        const updatedData = cached.data.filter(item => item.id !== id);
+        saveCachedCollection(table, updatedData);
       }
-      
-      const { error } = await supabase.from(table).delete().eq('id', id);
-      if (error) {
-        // Handle RLS policy violations specifically
-        if (error.code === '42501' || error.message?.includes('row-level security')) {
-          return { 
-            success: false, 
-            error: 'Permission denied. Please ensure you are logged in and have access to this school\'s data.',
-            details: error
-          };
-        }
-        throw error;
-      }
-      
-      // Remove item from cache
-      try {
-        const cached = getCachedCollection(table);
-        if (cached && cached.data) {
-          const updatedData = cached.data.filter(item => item.id !== id);
-          saveCachedCollection(table, updatedData);
-          console.log(`✅ Updated cache for ${table} after delete`);
-          
-          // Invalidate filtered caches to ensure consistency
-          invalidateFilteredCaches(table);
-        }
-      } catch (cacheError) {
-        console.warn('Cache update failed after delete:', cacheError);
-      }
-      
-      return { success: true };
-    } else {
-      // Fallback to localStorage
-      await simulateDelay();
-      const items = getCollection(table);
-      const filteredItems = items.filter(i => i.id !== id);
-      saveCollection(table, filteredItems);
-      
-      // Update cache to remove deleted item for immediate UI updates
-      try {
-        const cached = getCachedCollection(table);
-        if (cached && cached.data) {
-          const updatedData = cached.data.filter(item => item.id !== id);
-          saveCachedCollection(table, updatedData);
-          console.log(`✅ Updated cache for ${table} after offline delete`);
-          
-          // Invalidate filtered caches to ensure consistency
-          invalidateFilteredCaches(table);
-        }
-      } catch (cacheError) {
-        console.warn('Cache update failed after offline delete:', cacheError);
-      }
-      
-      // Add to sync queue for later
-      addToSyncQueue(table, 'delete', { id });
-      
-      return { success: true };
+      invalidateFilteredCaches(table);
+    } catch (cacheError) {
+      console.warn('Cache update failed after delete:', cacheError);
     }
+    
+    console.log(`✅ [LocalFirst] Deleted ${id} from ${table} locally`);
+    
+    // STEP 3: Sync to Supabase in BACKGROUND (fire and forget)
+    (async () => {
+      try {
+        const isOnline = await isSupabaseAvailable();
+        if (isOnline && shouldUseSupabase()) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            const { error } = await supabase.from(table).delete().eq('id', id);
+            if (error) {
+              console.error(`[BackgroundSync] Failed to delete ${id} from ${table}:`, error);
+              // Add to sync queue for retry
+              addToSyncQueue(table, 'delete', { id });
+            } else {
+              console.log(`✅ [BackgroundSync] Deleted ${id} from ${table} in Supabase`);
+            }
+          }
+        } else {
+          // Offline - add to sync queue
+          addToSyncQueue(table, 'delete', { id });
+        }
+      } catch (bgError) {
+        console.error(`[BackgroundSync] Error deleting ${id}:`, bgError);
+        addToSyncQueue(table, 'delete', { id });
+      }
+    })();
+    
+    // Return success immediately (don't wait for background sync)
+    return { success: true };
   } catch (error: any) {
     console.error(`Error deleting from ${table}:`, error);
     return { success: false, error: error.message };
@@ -2006,18 +2021,29 @@ export const getFees = async (schoolId?: string, studentId?: string, grades?: st
   
   // Map snake_case fields back to camelCase for application compatibility
   if (response.success && response.data) {
-    // CRITICAL FIX: Use database values directly instead of recalculating
-    // The SQL triggers now handle all balance and status calculations correctly
+    // Map fields and recalculate status based on actual paid/balance values
     const feesWithMappedFields = response.data.map((fee: any) => {
+        // Ensure numeric fields are correctly typed
+        const amount = Number(fee.amount || 0);
+        const discount = Number(fee.discount || 0);
+        const paid = Number(fee.paid || 0);
+        const netAmount = amount - discount;
+        const balance = Number(fee.balance ?? Math.max(0, netAmount - paid));
+        
+        // CRITICAL FIX: Recalculate status based on actual paid/balance values
+        // This ensures filter works correctly even if database status is stale
+        let calculatedStatus: 'paid' | 'partial' | 'unpaid' = 'unpaid';
+        if (paid > 0) {
+          calculatedStatus = balance <= 0 ? 'paid' : 'partial';
+        }
+        
         return {
           ...fee,
-          // Ensure numeric fields are correctly typed
-          amount: Number(fee.amount || 0),
-          discount: Number(fee.discount || 0),
-          // Use database values directly - SQL triggers ensure these are correct
-          paid: fee.paid || 0,
-          balance: fee.balance || 0,
-          status: fee.status || 'unpaid',
+          amount,
+          discount,
+          paid,
+          balance,
+          status: calculatedStatus,
           studentId: fee.student_id,
           studentName: fee.student_name,
           schoolId: fee.school_id,

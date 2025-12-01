@@ -148,6 +148,10 @@ const AccountForm = () => {
       newErrors.gradeLevels = 'يجب اختيار المدرسة والصفوف للمدير الصف';
     }
     
+    if (formData.role === 'backupAccount' && !formData.schoolId) {
+      newErrors.schoolId = 'يجب اختيار المدرسة للحساب الاحتياطي';
+    }
+    
     // If there are errors, return them, otherwise return null
     return Object.keys(newErrors).length > 0 ? newErrors : null;
   };
@@ -335,6 +339,7 @@ const AccountForm = () => {
             >
               <option value="schoolAdmin">مدير مدرسة</option>
               <option value="gradeManager">مدير صف</option>
+              <option value="backupAccount">الحساب الاحتياطي</option>
             </select>
           </div>
           

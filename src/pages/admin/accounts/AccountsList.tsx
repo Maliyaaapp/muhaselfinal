@@ -537,6 +537,8 @@ const AccountsList = () => {
         return 'مدير مدرسة';
       case 'gradeManager':
         return 'مدير صف';
+      case 'backupAccount':
+        return 'الحساب الاحتياطي';
       default:
         return role;
     }

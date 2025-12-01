@@ -26,7 +26,8 @@ export const FEE_TYPES = [
   { id: 'uniform', name: 'زي مدرسي' },
   { id: 'books', name: 'كتب' },
   { id: 'other', name: 'رسوم أخرى' },
-  { id: 'transportation_and_tuition', name: 'رسوم مدمجة' }
+  { id: 'transportation_and_tuition', name: 'رسوم مدمجة' },
+  { id: 'tuition_with_transport', name: 'رسوم دراسية مع النقل' }
 ];
 
 // Installment Plans

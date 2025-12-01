@@ -8,6 +8,7 @@ import { useSupabaseAuth } from '../../contexts/SupabaseAuthContext';
 import { useState, useEffect } from 'react';
 import '../../styles/sidebar.css';
 import storage from '../../utils/storage';
+import SyncStatusIndicator from '../SyncStatusIndicator';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -114,6 +115,39 @@ const Sidebar = ({ isOpen, toggleSidebar }: SidebarProps) => {
   ];
 
   const isGradeManager = user?.role === 'gradeManager';
+  const isBackupAccount = user?.role === 'backupAccount';
+
+  // Filter menu sections based on role
+  const getFilteredMenuSections = (): MenuSection[] => {
+    if (isBackupAccount) {
+      // Backup account only sees: Students (names only), Fees, Installments
+      return [
+        {
+          title: "إدارة المدرسة",
+          items: [
+            { 
+              path: '/school/students', 
+              icon: <User size={20} strokeWidth={2} />, 
+              title: 'الطلبة'
+            },
+            { 
+              path: '/school/fees', 
+              icon: <CreditCard size={20} strokeWidth={2} />, 
+              title: 'الرسوم'
+            },
+            { 
+              path: '/school/installments', 
+              icon: <Clock size={20} strokeWidth={2} />, 
+              title: 'الأقساط' 
+            }
+          ]
+        }
+      ];
+    }
+    return menuSections;
+  };
+
+  const filteredMenuSections = getFilteredMenuSections();
 
 
 
@@ -149,6 +183,8 @@ const Sidebar = ({ isOpen, toggleSidebar }: SidebarProps) => {
                   <span>مدير النظام</span>
                 ) : user.role === 'schoolAdmin' ? (
                   <span>المدير المالي</span>
+                ) : user.role === 'backupAccount' ? (
+                  <span>الحساب الاحتياطي</span>
                 ) : user.role === 'teacher' ? (
                   <span>معلم</span>
                 ) : user.role === 'accountant' ? (
@@ -179,7 +215,7 @@ const Sidebar = ({ isOpen, toggleSidebar }: SidebarProps) => {
       {/* Modern Main Menu */}
       <div className="flex-1 overflow-y-auto py-3 menu-container">
         {/* Dashboard and School Management Sections */}
-        {menuSections.slice(0, 2).map((section, sectionIndex) => (
+        {(isBackupAccount ? filteredMenuSections : menuSections.slice(0, 2)).map((section, sectionIndex) => (
           <div key={sectionIndex} className="modern-sidebar-section">
             {isOpen && (
               <div className="modern-section-title">
@@ -216,8 +252,8 @@ const Sidebar = ({ isOpen, toggleSidebar }: SidebarProps) => {
           </div>
         ))}
         
-        {/* Settings Section */}
-        {menuSections.slice(2).map((section, sectionIndex) => (
+        {/* Settings Section - Hidden for backup account */}
+        {!isBackupAccount && menuSections.slice(2).map((section, sectionIndex) => (
           <div key={sectionIndex + 2} className="modern-sidebar-section">
             {isOpen && (
               <div className="modern-section-title">
@@ -278,6 +314,8 @@ const Sidebar = ({ isOpen, toggleSidebar }: SidebarProps) => {
                         <span>مدير النظام</span>
                       ) : user.role === 'schoolAdmin' ? (
                         <span>المدير المالي</span>
+                      ) : user.role === 'backupAccount' ? (
+                        <span>الحساب الاحتياطي</span>
                       ) : user.role === 'teacher' ? (
                         <span>معلم</span>
                       ) : user.role === 'accountant' ? (
@@ -309,6 +347,12 @@ const Sidebar = ({ isOpen, toggleSidebar }: SidebarProps) => {
               <div className="section-divider"></div>
             </div>
           )}
+          
+          {/* Sync Status Indicator */}
+          <div className={`sync-status-wrapper ${!isOpen && 'justify-center'} flex items-center mb-2 px-2`}>
+            <SyncStatusIndicator />
+          </div>
+          
           <div className="footer-actions">
             <button
               onClick={toggleTheme}

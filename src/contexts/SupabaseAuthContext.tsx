@@ -3,7 +3,7 @@ import { Session } from '@supabase/supabase-js';
 import * as supabaseAuthService from '../services/supabaseAuthService';
 import { shouldUseSupabase } from '../services/supabase';
 
-type Role = 'admin' | 'schoolAdmin' | 'gradeManager';
+type Role = 'admin' | 'schoolAdmin' | 'gradeManager' | 'backupAccount';
 
 interface User {
   id: string;

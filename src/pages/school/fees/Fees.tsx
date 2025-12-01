@@ -1,9 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Plus, Edit, Trash, Filter, CreditCard, MessageSquare, Download, Upload, User, ChevronDown, ChevronUp, Book, Bus, CreditCard as PaymentIcon, ChevronRight, DollarSign, Info, Clock } from 'lucide-react';
 import { useSupabaseAuth } from '../../../contexts/SupabaseAuthContext';
 import { FEE_TYPES, CURRENCY } from '../../../utils/constants';
 import * as hybridApi from '../../../services/hybridApi';
+import { emitFullPayment, emitPartialPayment, emitBatchPayment, emitPaymentFailed, isRefreshNeeded, clearRefreshNeeded } from '../../../utils/paymentEvents';
+import { usePaymentListener } from '../../../hooks/usePaymentListener';
 import pdfPrinter from '../../../services/pdfPrinter';
 import { exportReceiptAsPDF } from '../../../services/pdf/receipts/receipt-export';
 import { generateFeeTemplateCSV, generateInstallmentTemplateCSV, exportFeesToCSV } from '../../../services/importExport';
@@ -130,6 +132,9 @@ const Fees = () => {
   const { user } = useSupabaseAuth();
   const { settings: _reportSettings } = useReportSettings();
   const location = useLocation();
+  
+  // Check if user is backup account (read-only, no delete)
+  const isBackupAccount = user?.role === 'backupAccount';
   const [fees, setFees] = useState<Fee[]>([]);
   const [filteredFees, setFilteredFees] = useState<Fee[]>([]);
   const [selectedGrade, setSelectedGrade] = useState<string>('all');
@@ -188,6 +193,42 @@ const Fees = () => {
   const [studentViewSearch, setStudentViewSearch] = useState<string>('');
   const [studentViewPage, setStudentViewPage] = useState<number>(1);
   const [studentViewPageSize, setStudentViewPageSize] = useState<number>(5);
+
+  // Ref to hold fetchData function for payment listener
+  const fetchDataRef = useRef<(() => Promise<void>) | null>(null);
+
+  // 🔔 PAYMENT EVENT LISTENER - Auto-refresh when payments are made on Installments page
+  const handlePaymentRefresh = useCallback(async () => {
+    console.log('[Fees] 🔄 Payment event received - starting refresh...');
+    try {
+      hybridApi.invalidateCache('fees');
+      hybridApi.invalidateCache('installments');
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      if (fetchDataRef.current) {
+        await fetchDataRef.current();
+        console.log('[Fees] ✅ Data refreshed after payment event');
+      } else {
+        console.warn('[Fees] ⚠️ fetchData not available yet');
+      }
+    } catch (error) {
+      console.error('[Fees] ❌ Error refreshing after payment:', error);
+    }
+  }, []); // No dependencies - uses ref
+
+  // Subscribe to installment payment events only (to avoid self-triggering)
+  usePaymentListener({
+    schoolId: user?.schoolId,
+    onRefresh: handlePaymentRefresh,
+    debounceMs: 150,
+    enabled: true,
+    onPaymentEvent: (event) => {
+      // Only refresh on installment payments (from Installments page)
+      if (event.type === 'payment:installment_completed') {
+        console.log('[Fees] 📬 Received installment payment event');
+      }
+    },
+  });
 
   const handleExportFeesColoredExcel = async () => {
     try {
@@ -446,7 +487,26 @@ const Fees = () => {
   // Fetch data and subscribe to changes
   useEffect(() => {
     // Create an async function inside the effect
+    // Store fetchData in ref for payment listener to access
+    fetchDataRef.current = fetchData;
+    
     const initData = async () => {
+      // Check if refresh was requested while component was unmounted
+      const refreshTimestamp = isRefreshNeeded('fees');
+      if (refreshTimestamp) {
+        console.log('[Fees] 🔄 Refresh was requested at', new Date(refreshTimestamp).toISOString());
+        // Clear the flag BEFORE fetching to prevent loops
+        clearRefreshNeeded('fees');
+        
+        // CRITICAL: Wait for database to fully commit before fetching
+        console.log('[Fees] ⏳ Waiting 800ms for database to commit...');
+        await new Promise(resolve => setTimeout(resolve, 800));
+        
+        // Clear ALL caches to force fresh fetch from Supabase
+        console.log('[Fees] 🗑️ Clearing all caches...');
+        await hybridApi.clearCache();
+      }
+      
       // CRITICAL: Clear cache on mount to ensure fresh data
       // This prevents showing stale data after partial payments
       console.log('🔄 Fees page mounted - clearing cache for fresh data');
@@ -589,6 +649,13 @@ const Fees = () => {
   };
 
   const handleDelete = async (id: string) => {
+    // Prevent delete for backup account
+    if (isBackupAccount) {
+      setAlertMessage('ليس لديك صلاحية الحذف');
+      setAlertOpen(true);
+      return;
+    }
+    
     if (window.confirm('هل أنت متأكد من حذف هذه الرسوم؟')) {
       try {
         await hybridApi.removeFee(id);
@@ -1223,6 +1290,16 @@ const Fees = () => {
         // SUCCESS: Update toast immediately (don't wait for refetch)
         toast.success(`تم حفظ الدفع بنجاح للطالب ${studentNameToProcess}`, { id: toastId });
         
+        // 🔔 EMIT BATCH PAYMENT EVENT - Installments page will auto-refresh
+        const totalAmountPaid = feesToUpdate.reduce((sum, f) => sum + (f.paid || 0), 0);
+        emitBatchPayment({
+          feeIds: feeIdsToUpdate,
+          totalAmountPaid: totalAmountPaid,
+          affectedInstallmentIds: installmentsToUpdate.map((i: any) => i.id),
+          schoolId: user?.schoolId,
+        });
+        console.log('[PayAll] Batch payment event emitted for installments refresh');
+        
         // DELAYED REFRESH: Wait for cache to update before refetching
         // This prevents race condition where stale data overwrites optimistic update
         setTimeout(() => {
@@ -1238,6 +1315,12 @@ const Fees = () => {
         
         // Show error toast
         toast.error('فشل حفظ الدفع - تم التراجع عن التغييرات', { id: toastId });
+        
+        // 🔔 EMIT PAYMENT FAILED EVENT
+        emitPaymentFailed({
+          error: error instanceof Error ? error.message : 'Unknown error',
+          schoolId: user?.schoolId,
+        });
       }
     })();
   };
@@ -1341,9 +1424,20 @@ const Fees = () => {
         
         // Invalidate caches
         hybridApi.invalidateCache('fees');
+        hybridApi.invalidateCache('installments');
         
         // SUCCESS: Update toast immediately (don't wait for refetch)
         toast.success(`تم حفظ الدفع بنجاح`, { id: toastId });
+        
+        // 🔔 EMIT FULL PAYMENT EVENT - Installments page will auto-refresh
+        emitFullPayment({
+          feeId: feeId,
+          studentId: fee.studentId,
+          amountPaid: fullPaymentAmount,
+          remainingBalance: 0,
+          schoolId: user?.schoolId,
+        });
+        console.log('[SingleFee] Payment event emitted for installments refresh');
         
         // DELAYED REFRESH: Wait for cache to update before refetching
         // This prevents race condition where stale data overwrites optimistic update
@@ -1358,6 +1452,13 @@ const Fees = () => {
         // ROLLBACK
         setFees(originalFees);
         toast.error('فشل حفظ الدفع - تم التراجع عن التغييرات', { id: toastId });
+        
+        // 🔔 EMIT PAYMENT FAILED EVENT
+        emitPaymentFailed({
+          feeId: feeId,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          schoolId: user?.schoolId,
+        });
       }
     })();
   };
@@ -1573,6 +1674,7 @@ const Fees = () => {
   const getFeeTypeLabel = (type: string) => {
     if (!type) return '';
     if (type === 'transportation_and_tuition') return 'رسوم مدمجة';
+    if (type === 'tuition_with_transport') return 'رسوم دراسية مع النقل';
     if (type === 'tuition') return 'رسوم دراسية';
     if (type === 'transportation') return 'نقل مدرسي';
     return type;
@@ -2136,6 +2238,16 @@ const Fees = () => {
         hybridApi.invalidateCache('fees');
         hybridApi.invalidateCache('installments');
         
+        // 🔔 EMIT PARTIAL PAYMENT EVENT - Installments page will auto-refresh
+        emitPartialPayment({
+          feeId: selectedFee.id,
+          studentId: selectedFee.studentId,
+          amountPaid: amount,
+          remainingBalance: newBalance,
+          schoolId: user?.schoolId,
+        });
+        console.log('[PartialPayment] Payment event emitted for installments refresh');
+        
         console.log('✅ Background save completed successfully');
       } catch (error) {
         console.error('❌ Background save failed:', error);
@@ -2157,6 +2269,13 @@ const Fees = () => {
         toast.error('فشل حفظ الدفع - تم التراجع عن التغييرات');
         setAlertMessage('حدث خطأ أثناء حفظ الدفع في قاعدة البيانات');
         setAlertOpen(true);
+        
+        // 🔔 EMIT PAYMENT FAILED EVENT
+        emitPaymentFailed({
+          feeId: selectedFee.id,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          schoolId: user?.schoolId,
+        });
       }
     };
     

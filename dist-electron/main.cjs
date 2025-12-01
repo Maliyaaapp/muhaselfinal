@@ -540,14 +540,19 @@ const registerPdfHandlers = async () => {
       await new Promise(resolve => setTimeout(resolve, 300));
       
       // Translate options to Electron printToPDF format
+      // IMPORTANT: When preferCSSPageSize is true, don't set margins to override CSS @page rules
       const pdfOptions = {
         printBackground: options?.printBackground !== false,
         landscape: options?.landscape || false,
         pageSize: options?.format || options?.pageSize || 'A4',
-        margins: { marginType: 'none' }, // Use 'none' for zero margins to match CSS @page
-        preferCSSPageSize: options?.preferCSSPageSize !== false, // Let CSS control page size
+        preferCSSPageSize: options?.preferCSSPageSize !== false, // Let CSS control page size and margins
         scale: options?.scale || 1.0
       };
+      
+      // Only set margins if NOT using CSS page size (for reports that don't have @page rules)
+      if (!options?.preferCSSPageSize) {
+        pdfOptions.margins = { marginType: 'none' };
+      }
       
       console.log('[PDF] Using options:', JSON.stringify(pdfOptions));
       
@@ -633,14 +638,19 @@ const registerPdfHandlers = async () => {
       await new Promise(resolve => setTimeout(resolve, 300));
       
       // Translate options to Electron printToPDF format
+      // IMPORTANT: When preferCSSPageSize is true, don't set margins to override CSS @page rules
       const pdfOptions = {
         printBackground: options?.printBackground !== false,
         landscape: options?.landscape || false,
         pageSize: options?.format || options?.pageSize || 'A4',
-        margins: { marginType: 'none' }, // Use 'none' for zero margins to match CSS @page
         preferCSSPageSize: options?.preferCSSPageSize !== false,
         scale: options?.scale || 1.0
       };
+      
+      // Only set margins if NOT using CSS page size (for reports that don't have @page rules)
+      if (!options?.preferCSSPageSize) {
+        pdfOptions.margins = { marginType: 'none' };
+      }
       
       // Generate PDF
       const data = await poolWindow.webContents.printToPDF(pdfOptions);
@@ -686,14 +696,19 @@ const registerPdfHandlers = async () => {
       await new Promise(resolve => setTimeout(resolve, 300));
       
       // Translate options to Electron printToPDF format
+      // IMPORTANT: When preferCSSPageSize is true, don't set margins to override CSS @page rules
       const pdfOptions = {
         printBackground: options?.printBackground !== false,
         landscape: options?.landscape || false,
         pageSize: options?.format || options?.pageSize || 'A4',
-        margins: { marginType: 'none' },
         preferCSSPageSize: options?.preferCSSPageSize !== false,
         scale: options?.scale || 1.0
       };
+      
+      // Only set margins if NOT using CSS page size (for reports that don't have @page rules)
+      if (!options?.preferCSSPageSize) {
+        pdfOptions.margins = { marginType: 'none' };
+      }
       
       // Generate PDF from the rendered content
       const data = await poolWindow.webContents.printToPDF(pdfOptions);
@@ -876,14 +891,19 @@ const registerPdfHandlers = async () => {
       await new Promise(resolve => setTimeout(resolve, 300)); // Reduced wait time
       
       // Translate options to Electron printToPDF format
+      // IMPORTANT: When preferCSSPageSize is true, don't set margins to override CSS @page rules
       const pdfOptions = {
         printBackground: options?.printBackground !== false,
         landscape: options?.landscape || false,
         pageSize: options?.format || options?.pageSize || 'A4',
-        margins: { marginType: 'none' },
         preferCSSPageSize: options?.preferCSSPageSize !== false,
         scale: options?.scale || 1.0
       };
+      
+      // Only set margins if NOT using CSS page size (for reports that don't have @page rules)
+      if (!options?.preferCSSPageSize) {
+        pdfOptions.margins = { marginType: 'none' };
+      }
       
       const data = await poolWindow.webContents.printToPDF(pdfOptions);
       

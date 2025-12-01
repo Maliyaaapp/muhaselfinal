@@ -282,7 +282,7 @@ const App = () => {
 
           {/* School Routes */}
           <Route path="/school" element={
-            <ProtectedRoute roles={['schoolAdmin', 'gradeManager']}>
+            <ProtectedRoute roles={['schoolAdmin', 'gradeManager', 'backupAccount']}>
               <SchoolLayout />
             </ProtectedRoute>
           }>
