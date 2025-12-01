@@ -437,9 +437,9 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
   .signatures {
     display: flex;
     justify-content: space-between;
-    margin-top: 100px; /* Increased margin to move signatures down */
+    margin-top: 60px;
     width: 100%;
-    padding: 0 15%;
+    padding: 0;
     position: relative;
     z-index: 1000;
   }
@@ -522,21 +522,29 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
         
         /* Base document styles - exact A4 sizing with safe print margins */
         @page {
-          size: 210mm 297mm;
-          margin: 0;
+          size: A4;
+          margin: 0mm 0mm 0mm 0mm;
         }
         
-        html, body {
+        html {
           width: 210mm;
           height: 297mm;
+          margin: 0;
+          padding: 0;
+          overflow-x: hidden;
+        }
+        
+        body {
+          width: 210mm;
+          min-height: 297mm;
           font-family: var(--font-family);
           background-color: white;
           color: #333;
           direction: ${documentDirection};
           margin: 0;
           padding: 0;
-          overflow: hidden;
-          position: relative;
+          box-sizing: border-box;
+          overflow-x: hidden;
         }
         
         /* Language specific adjustments */
@@ -585,52 +593,64 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
         /* Screen display styles */
         @media screen {
           body {
-            background-color: #f8f9fa;
-            padding: 0;
+            background-color: #e5e7eb;
+            padding: 20mm 0;
             display: flex;
             justify-content: center;
             align-items: flex-start;
+            min-height: 100vh;
           }
           
           .receipt-container {
-            box-shadow: var(--shadow-soft);
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
             width: 210mm;
             max-width: 210mm;
-            height: 297mm;
+            min-height: 297mm;
             margin: 0 auto;
             background-color: white;
             position: relative;
-            overflow: hidden;
+            display: flex;
+            flex-direction: column;
           }
         }
         
         /* Print-specific styles with enhanced compatibility */
         @media print {
           @page {
-            size: 210mm 297mm;
-            margin: 0;
+            size: A4;
+            margin: 0mm 0mm 0mm 0mm;
           }
           
-          html, body {
+          html {
             width: 210mm;
             height: 297mm;
             margin: 0 !important;
             padding: 0 !important;
-            overflow: hidden !important;
+          }
+          
+          body {
+            width: 210mm;
+            min-height: 297mm;
+            margin: 0 !important;
+            padding: 0 !important;
+            background-color: white !important;
           }
           
           .receipt-container {
-            box-shadow: none;
-            width: 210mm;
-            height: 297mm;
-            margin: 0;
-            padding: 0;
-            position: relative;
-            overflow: hidden;
+            box-shadow: none !important;
+            width: 100% !important;
+            min-height: 267mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            page-break-after: always;
+            display: flex !important;
+            flex-direction: column !important;
           }
           
           .receipt-body {
-            padding-bottom: 20px !important;
+            flex: 1 !important;
+            padding: 10mm 0 8mm 0 !important;
+            margin-bottom: 0 !important;
           }
           
           .no-print {
@@ -671,42 +691,73 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
             print-color-adjust: exact !important;
           }
           
-          /* Ensure header and footer print with correct colors */
+          /* Ensure header prints with correct colors and no page break - EDGE TO EDGE */
           .receipt-header {
-            background: linear-gradient(135deg, ${isInstallmentReceipt ? '#1A365D 0%, #2C5282 100%' : '#E3F2FD 0%, #FFFFFF 100%'}) !important;
+            background: ${isInstallmentReceipt ? '#1A365D' : '#E3F2FD'} !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+            color-adjust: exact !important;
             color: ${isInstallmentReceipt ? 'white' : '#1A365D'} !important;
+            page-break-inside: avoid !important;
+            page-break-after: avoid !important;
+            padding: 6mm 10mm !important;
+            border-bottom: 2px solid ${isInstallmentReceipt ? '#FFFFFF' : '#1A365D'} !important;
+            width: 210mm !important;
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            margin: 0 !important;
           }
           
-          .receipt-footer {
-            background: linear-gradient(135deg, #1A365D 0%, #2C5282 100%) !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-            color: white !important;
+          .receipt-info {
+            page-break-inside: avoid !important;
+            page-break-after: avoid !important;
+            padding: 5mm 10mm !important;
           }
           
           /* Table header colors based on receipt type */
+          .fee-table {
+            page-break-inside: avoid !important;
+            border: 2px solid #000000 !important;
+          }
+          
           .fee-table th {
-            background: linear-gradient(135deg, ${isInstallmentReceipt ? '#800020 0%, #A52A2A 100%' : '#E3F2FD 0%, #FFFFFF 100%'}) !important;
+            background: ${isInstallmentReceipt ? '#800020' : '#E3F2FD'} !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+            color-adjust: exact !important;
             color: ${isInstallmentReceipt ? 'white' : '#1A365D'} !important;
+            border: 1px solid #000000 !important;
+          }
+          
+          .fee-table td {
+            border: 1px solid #000000 !important;
           }
           
           /* Ensure header text colors print correctly */
           .receipt-header h1,
           .receipt-header p {
             color: ${isInstallmentReceipt ? 'white' : '#1A365D'} !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color-adjust: exact !important;
+          }
+          
+          .header-contact-info {
+            gap: 4px !important;
+            padding: 3px 0 !important;
           }
           
           .header-contact-info span {
-            background: ${isInstallmentReceipt 
-              ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.1) 100%)' 
-              : 'linear-gradient(135deg, rgba(26, 54, 93, 0.08) 0%, rgba(66, 153, 225, 0.12) 100%)'} !important;
-            border: 1px solid ${isInstallmentReceipt ? 'rgba(255, 255, 255, 0.4)' : 'rgba(66, 153, 225, 0.3)'} !important;
+            background: ${isInstallmentReceipt ? '#2C5282' : '#FFFFFF'} !important;
+            border: 1px solid #000000 !important;
             color: ${isInstallmentReceipt ? '#FFFFFF' : '#1A365D'} !important;
             -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color-adjust: exact !important;
+            padding: 4px 10px !important;
+            font-size: 10px !important;t: exact !important;
             print-color-adjust: exact !important;
           }
           
@@ -722,29 +773,84 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
             background-color: transparent !important;
             border-radius: 0 !important;
             border: none !important;
+            filter: none !important;
           }
           
           .footer-copyright {
             color: white !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+            color-adjust: exact !important;
+          }
+          
+          /* Remove all shadows and rounded corners for print */
+          * {
+            box-shadow: none !important;
+            text-shadow: none !important;
+          }
+          
+          .receipt-info-item {
+            box-shadow: none !important;
+            border-radius: 0 !important;
+          }
+          
+          .fee-table tr:last-child td {
+            border-top: 2px solid #000000 !important;
+          }
+          
+          .signatures {
+            margin-top: 40px !important;
+            padding: 0 !important;
+          }
+          
+          .signature-block {
+            background: transparent !important;
+            border-radius: 0 !important;
+          }
+          
+          .fee-table {
+            margin: 5mm auto !important;
           }
           
           /* Fix colors for print */
           .status-badge.status-paid {
-            background-color: rgba(56, 161, 105, 0.15) !important;
+            background-color: #FFFFFF !important;
             color: #276749 !important;
-            border: 1px solid rgba(56, 161, 105, 0.3) !important;
+            border: 2px solid #276749 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color-adjust: exact !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
           }
           
           .status-badge.status-partial {
-            background-color: rgba(236, 201, 75, 0.15) !important;
+            background-color: #FFFFFF !important;
             color: #975A16 !important;
-            border: 1px solid rgba(236, 201, 75, 0.3) !important;
+            border: 2px solid #975A16 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color-adjust: exact !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
+          }
+          
+          .status-badge.status-unpaid {
+            background-color: #FFFFFF !important;
+            color: #7F1D1D !important;
+            border: 2px solid #7F1D1D !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color-adjust: exact !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
           }
           
           .info-group::before {
-            background: linear-gradient(to bottom, #1A365D, #2C5282) !important;
+            background: #1A365D !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color-adjust: exact !important;
           }
           
           /* Ensure footer is visible in PDF and fixed at bottom */
@@ -763,54 +869,90 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
             direction: ${documentDirection} !important;
           }
           
-          /* Ensure header fits on page */
+          /* Ensure header fits on page - FULL WIDTH EDGE TO EDGE */
           .receipt-header {
-            padding: 10px 12px !important;
+            width: 210mm !important;
+            padding: 6mm 10mm !important;
+            margin: 0 !important;
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+          }
+          
+          .receipt-header h1 {
+            font-size: 22px !important;
+            text-shadow: none !important;
+          }
+          
+          .receipt-header p {
+            font-size: 14px !important;
           }
           
           /* Ensure logo fits properly */
           .logo {
-            margin-top: 6px !important;
-            margin-bottom: 10px !important;
+            margin-top: 5px !important;
+            margin-bottom: 8px !important;
           }
           
           .logo img {
-            max-height: 90px !important;
-            max-width: 200px !important;
+            max-height: 80px !important;
+            max-width: 180px !important;
           }
           
           /* Reduce body padding for print */
           .receipt-body {
-            padding: 12px 12px !important;
-            margin-bottom: 10px !important;
-            padding-bottom: 10px !important;
+            padding: 8px 0 !important;
+            margin-bottom: 8px !important;
+            padding-bottom: 8px !important;
+          }
+          
+          .content-wrapper {
+            width: 90% !important;
+            max-width: 170mm !important;
+            margin: 0 auto !important;
+          }
+          
+          .receipt-container {
+            padding-top: 90mm !important;
           }
           
           /* Reduce info section spacing */
           .info-section {
-            gap: 10px !important;
-            margin-bottom: 15px !important;
+            gap: 8px !important;
+            margin-bottom: 10px !important;
           }
           
           .info-group {
-            padding: 12px !important;
+            padding: 8px !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
           }
           
-          /* Reduce receipt info padding */
+          /* Receipt info bar - FULL WIDTH immediately after header */
           .receipt-info {
-            padding: 6px 12px !important;
+            padding: 4mm 10mm !important;
+            width: 210mm !important;
+            position: absolute !important;
+            top: 70mm !important;
+            left: 0 !important;
+            right: 0 !important;
+            margin: 0 !important;
           }
           
           .header-contact-info span {
-            background: rgba(255, 255, 255, 0.15) !important;
-            border: 1px solid rgba(255, 255, 255, 0.3) !important;
-            color: white !important;
+            background: ${isInstallmentReceipt ? '#2C5282' : '#FFFFFF'} !important;
+            border: 1px solid #000000 !important;
+            color: ${isInstallmentReceipt ? 'white' : '#1A365D'} !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+            color-adjust: exact !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
           }
           
           .header-contact-info span strong {
-            color: white !important;
+            color: ${isInstallmentReceipt ? 'white' : '#1A365D'} !important;
             font-weight: 600 !important;
             margin-right: ${isArabic ? '0' : '5px'} !important;
             margin-left: ${isArabic ? '5px' : '0'} !important;
@@ -860,10 +1002,14 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
         .receipt-container {
           position: relative;
           width: 210mm;
-          height: 297mm;
-          overflow: hidden;
+          min-height: 297mm;
           background: white;
           z-index: 10;
+          display: flex;
+          flex-direction: column;
+          box-sizing: border-box;
+          margin: 0;
+          padding: 0;
         }
         
         /* Enhanced watermark styling */
@@ -928,19 +1074,29 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
           background-image: ${data.schoolLogo ? `url('${data.schoolLogo}')` : 'none'};
         }
         
-        /* Modern header with premium gradient */
+        /* Modern header with premium gradient - FULL WIDTH EDGE TO EDGE */
         .receipt-header {
           background: linear-gradient(135deg, ${isInstallmentReceipt ? '#1A365D 0%, #2C5282 100%' : '#E3F2FD 0%, #FFFFFF 100%'});
           color: ${isInstallmentReceipt ? 'white' : '#1A365D'};
-          padding: 12px 15px;
-          position: relative;
+          width: 210mm;
+          padding: 8mm 10mm;
+          margin: 0;
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
           z-index: 220;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          border-bottom: 1px solid ${isInstallmentReceipt ? 'rgba(255, 255, 255, 0.2)' : 'rgba(26, 54, 93, 0.2)'};
-          box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+          border-bottom: 2px solid ${isInstallmentReceipt ? 'rgba(255, 255, 255, 0.3)' : 'rgba(26, 54, 93, 0.3)'};
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+          flex-shrink: 0;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+          color-adjust: exact;
+          box-sizing: border-box;
         }
         
         .receipt-header h1 {
@@ -1018,16 +1174,39 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
           font-size: 11px;
         }
         
-        /* Modern receipt info bar */
+        /* Content wrapper - centers content with 90% width */
+        .content-wrapper {
+          width: 90%;
+          max-width: 170mm;
+          margin: 0 auto;
+          padding: 0;
+          box-sizing: border-box;
+        }
+        
+        /* Add top padding to receipt container to account for absolute header + info bar */
+        .receipt-container {
+          padding-top: 120mm;
+          position: relative;
+        }
+        
+        /* Modern receipt info bar - FULL WIDTH immediately after header */
         .receipt-info {
           display: flex;
           justify-content: space-between;
-          padding: 8px 15px;
+          align-items: center;
+          padding: 5mm 10mm;
           background-color: #F7FAFC;
           border-bottom: 1px solid #E2E8F0;
           font-weight: 500;
-          position: relative;
+          position: absolute;
+          top: 95mm;
+          left: 0;
+          right: 0;
+          width: 210mm;
           z-index: 215;
+          flex-shrink: 0;
+          margin: 0;
+          box-sizing: border-box;
         }
         
         .receipt-info-item {
@@ -1040,11 +1219,12 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
           box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
           border: 1px solid #EDF2F7;
           text-align: ${isArabic ? 'right' : 'left'};
+          font-size: 13px;
         }
         
         .receipt-info-item strong {
           font-weight: 700;
-          color: #2D3748;
+          color: #1A365D;
           font-size: 13px;
           margin-right: ${isArabic ? '0' : '5px'};
           margin-left: ${isArabic ? '5px' : '0'};
@@ -1052,12 +1232,15 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
         
         /* Modern receipt body */
         .receipt-body {
-          padding: 15px 15px;
+          flex: 1;
+          padding: 5mm 0 15mm 0;
           position: relative;
           z-index: 210;
-          margin-bottom: 15px; /* Add bottom margin now that we don't have footer */
-          padding-bottom: 15px; /* Reduce padding since we don't need space for footer */
           background-color: rgba(255, 255, 255, 0.92);
+          box-sizing: border-box;
+          display: flex;
+          flex-direction: column;
+          width: 100%;
         }
         
         /* Modern status badges */
@@ -1078,18 +1261,27 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
           background-color: rgba(56, 161, 105, 0.15);
           color: #276749;
           border: 1px solid rgba(56, 161, 105, 0.3);
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+          color-adjust: exact;
         }
         
         .status-partial {
           background-color: rgba(236, 201, 75, 0.15);
           color: #975A16;
           border: 1px solid rgba(236, 201, 75, 0.3);
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+          color-adjust: exact;
         }
 
         .status-unpaid {
           background-color: rgba(239, 68, 68, 0.15);
           color: #7F1D1D;
           border: 1px solid rgba(239, 68, 68, 0.3);
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+          color-adjust: exact;
         }
         
         .status-badge:hover {
@@ -1166,7 +1358,7 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
         .fee-table {
           width: 100%;
           border-collapse: collapse;
-          margin-top: 20px;
+          margin: 5mm auto;
           border: 2px solid ${isInstallmentReceipt ? '#800020' : '#1A365D'};
           table-layout: fixed;
         }
@@ -1176,9 +1368,13 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
           background: linear-gradient(135deg, ${isInstallmentReceipt ? '#800020 0%, #A52A2A 100%' : '#E3F2FD 0%, #FFFFFF 100%'});
           color: ${isInstallmentReceipt ? 'white' : '#1A365D'} !important;
           font-weight: bold;
-          padding: 10px 15px;
-          border: none;
+          padding: 3mm 4mm;
+          border: 1px solid ${isInstallmentReceipt ? '#600018' : '#1A365D'};
           text-align: ${isArabic ? 'right' : 'left'};
+          font-size: 14px;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+          color-adjust: exact;
         }
         
         .fee-table th:nth-child(2) {
@@ -1187,14 +1383,19 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
         
         /* Table body */
         .fee-table td {
-          padding: 10px 15px;
-          border-top: 1px solid #DDD;
-          font-size: 14px;
+          padding: 3mm 4mm;
+          border: 1px solid #ddd;
+          font-size: 13px;
         }
         
         .fee-table tr:last-child {
           background-color: #F0F4F8;
           font-weight: bold;
+        }
+        
+        .fee-table tr:last-child td {
+          border-top: 2px solid ${isInstallmentReceipt ? '#800020' : '#1A365D'};
+          font-size: 14px;
         }
         
         .fee-table .fee-amount {
@@ -1254,7 +1455,9 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
             <strong>${isArabic ? 'التاريخ:' : 'Date:'}</strong> <span dir="ltr">${formatDate(data.date)}</span>
           </div>
         </div>
+        
         <div class="receipt-body">
+          <div class="content-wrapper">
           <div style="text-align: center;" class="payment-status">
             <span class="status-badge ${explicitStatus === 'partial' ? 'status-partial' : (explicitStatus === 'unpaid' ? 'status-unpaid' : 'status-paid')}">
               ${isArabic 
@@ -1436,6 +1639,7 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
               <div class="signature-line"></div>
               <div>توقيع الادارة المالية / المستلم</div>
             </div>
+          </div>
           </div>
         </div>
       </div>

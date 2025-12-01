@@ -3,6 +3,7 @@ import { supabase, shouldUseSupabase } from './supabase';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import storage from '../utils/storage';
 import { STORAGE_KEYS } from './api';
+import { deviceTracking, type LoginSession } from './deviceTracking';
 
 // Export STORAGE_KEYS for other modules
 export { STORAGE_KEYS };
@@ -2971,6 +2972,80 @@ export const saveInstallment = async (installmentData: any): Promise<ApiResponse
   }
 };
 
+// Create installment plan from a fee
+export const createInstallmentPlan = async (fee: any, count: number, interval: number = 1): Promise<ApiResponse> => {
+  try {
+    if (count <= 0) {
+      return { success: true, data: [] };
+    }
+    
+    const installments: any[] = [];
+    const feeNetAmount = (fee.amount || 0) - (fee.discount || 0);
+    const amount = Math.floor(feeNetAmount / count);
+    const remainder = feeNetAmount % count;
+    
+    // Calculate first installment date
+    const startDate = new Date(fee.dueDate || new Date());
+    
+    // Arabic month names
+    const monthNames = [
+      'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+      'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
+    ];
+    
+    for (let i = 0; i < count; i++) {
+      // Calculate installment amount (add remainder to first installment)
+      const installmentAmount = i === 0 ? amount + remainder : amount;
+      
+      // Calculate due date (first installment is on fee due date, others are monthly)
+      const dueDate = new Date(startDate);
+      dueDate.setMonth(startDate.getMonth() + i * interval);
+      
+      // Get the month name for this installment
+      const installmentMonth = monthNames[dueDate.getMonth()];
+      
+      // Create installment
+      const installment = {
+        studentId: fee.studentId || fee.student_id,
+        studentName: fee.studentName || fee.student_name,
+        grade: fee.grade,
+        amount: installmentAmount,
+        paidAmount: 0,
+        balance: installmentAmount,
+        dueDate: dueDate.toISOString().split('T')[0],
+        paidDate: null,
+        status: 'upcoming',
+        feeId: fee.id,
+        fee_id: fee.id,
+        feeType: fee.feeType || fee.fee_type,
+        fee_type: fee.feeType || fee.fee_type,
+        schoolId: fee.schoolId || fee.school_id,
+        school_id: fee.schoolId || fee.school_id,
+        installmentCount: count,
+        installment_count: count,
+        installmentNumber: i + 1,
+        installment_number: i + 1,
+        installmentMonth: installmentMonth,
+        installment_month: installmentMonth
+      };
+      
+      // Save each installment to database
+      const saveResponse = await createInstallment(installment);
+      if (saveResponse.success && saveResponse.data) {
+        installments.push(saveResponse.data);
+      }
+    }
+    
+    // Invalidate cache to ensure fresh data
+    invalidateCache('installments');
+    
+    return { success: true, data: installments };
+  } catch (error: any) {
+    console.error('Error creating installment plan:', error);
+    return { success: false, error: error.message || 'Failed to create installment plan' };
+  }
+};
+
 // Messages API
 export const getMessages = async (schoolId?: string, studentId?: string, grades?: string | string[]): Promise<ApiResponse> => {
   const filters: Record<string, any> = {};
@@ -3657,6 +3732,140 @@ export const subscribeToRealtimeChanges = (table: string, callback: Function) =>
   };
 };
 
+// ============================================
+// DEVICE TRACKING FUNCTIONS
+// ============================================
+
+/**
+ * Save login session with device information
+ */
+const saveLoginSession = async (session: LoginSession): Promise<ApiResponse> => {
+  try {
+    if (await isSupabaseAvailable() && shouldUseSupabase()) {
+      const { data, error } = await supabase
+        .from('login_sessions')
+        .insert({
+          user_email: session.userEmail,
+          user_name: session.userName,
+          user_role: session.userRole,
+          school_id: session.schoolId,
+          computer_name: session.computerName,
+          windows_username: session.windowsUsername,
+          platform: session.platform,
+          os_version: session.osVersion,
+          login_time: session.loginTime
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      console.log('✅ Login session saved:', {
+        email: session.userEmail,
+        computer: session.computerName
+      });
+
+      return { success: true, data };
+    } else {
+      // Store locally if offline
+      const sessions = JSON.parse(localStorage.getItem('pending_login_sessions') || '[]');
+      sessions.push(session);
+      localStorage.setItem('pending_login_sessions', JSON.stringify(sessions));
+      
+      console.log('📝 Login session queued for sync');
+      return { success: true, data: session };
+    }
+  } catch (error: any) {
+    console.error('❌ Error saving login session:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Get device info for current session
+ */
+const getDeviceInfo = async () => {
+  return await deviceTracking.getDeviceInfo();
+};
+
+/**
+ * Get payment audit trail
+ */
+const getPaymentAuditTrail = async (schoolId: string, daysBack: number = 30): Promise<ApiResponse> => {
+  try {
+    if (await isSupabaseAvailable() && shouldUseSupabase()) {
+      const { data, error } = await supabase
+        .from('payment_audit_trail')
+        .select('*')
+        .eq('school_id', schoolId)
+        .gte('timestamp', new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString())
+        .order('timestamp', { ascending: false });
+
+      if (error) throw error;
+
+      return { success: true, data };
+    } else {
+      return { success: false, error: 'Offline mode - audit trail not available' };
+    }
+  } catch (error: any) {
+    console.error('❌ Error getting payment audit trail:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Get suspicious logins (same email from different computers)
+ */
+const getSuspiciousLogins = async (schoolId: string, daysBack: number = 30): Promise<ApiResponse> => {
+  try {
+    if (await isSupabaseAvailable() && shouldUseSupabase()) {
+      const { data, error } = await supabase
+        .rpc('get_suspicious_logins', {
+          p_school_id: schoolId,
+          p_days_back: daysBack
+        });
+
+      if (error) throw error;
+
+      return { success: true, data };
+    } else {
+      return { success: false, error: 'Offline mode - suspicious logins not available' };
+    }
+  } catch (error: any) {
+    console.error('❌ Error getting suspicious logins:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Get device activity
+ */
+const getDeviceActivity = async (
+  schoolId: string,
+  computerName?: string,
+  daysBack: number = 30
+): Promise<ApiResponse> => {
+  try {
+    if (await isSupabaseAvailable() && shouldUseSupabase()) {
+      const { data, error } = await supabase
+        .rpc('get_device_activity', {
+          p_school_id: schoolId,
+          p_computer_name: computerName || null,
+          p_days_back: daysBack
+        });
+
+      if (error) throw error;
+
+      return { success: true, data };
+    } else {
+      return { success: false, error: 'Offline mode - device activity not available' };
+    }
+  } catch (error: any) {
+    console.error('❌ Error getting device activity:', error);
+    return { success: false, error: error.message };
+  }
+};
+
 // Export the API
 const hybridApi = {
   // Generic CRUD
@@ -3786,7 +3995,14 @@ const hybridApi = {
   preloadEssentialData,
   warmCache,
   setupRealtimeSync,
-  subscribeToRealtimeChanges
+  subscribeToRealtimeChanges,
+  
+  // Device tracking
+  saveLoginSession,
+  getDeviceInfo,
+  getPaymentAuditTrail,
+  getSuspiciousLogins,
+  getDeviceActivity
 };
 
 // Export functions for external use

@@ -170,6 +170,32 @@ export const SupabaseAuthProvider = ({ children }: { children: ReactNode }) => {
       
       setUser(user);
       setIsAuthenticated(true);
+      
+      // 🖥️ DEVICE TRACKING: Save login session with device info
+      try {
+        const { deviceTracking } = await import('../services/deviceTracking');
+        const hybridApi = (await import('../services/hybridApi')).default;
+        
+        const session = await deviceTracking.createLoginSession(
+          user.email,
+          user.name,
+          user.role,
+          user.schoolId || ''
+        );
+        
+        if (session) {
+          await hybridApi.saveLoginSession(session);
+          console.log('✅ Login session tracked:', {
+            email: session.userEmail,
+            computer: session.computerName,
+            windowsUser: session.windowsUsername
+          });
+        }
+      } catch (trackingError) {
+        // Don't fail login if tracking fails
+        console.warn('⚠️ Failed to track login session:', trackingError);
+      }
+      
       return user;
     } catch (error: any) {
       setAuthError(error.message || 'حدث خطأ أثناء تسجيل الدخول');

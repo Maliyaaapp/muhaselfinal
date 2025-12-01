@@ -119,7 +119,7 @@ export const generateSampleAccounts = (schoolId: string, schoolName: string) => 
   return [
     {
       id: uuidv4(),
-      name: 'مدير المدرسة',
+      name: 'المدير المالي',
       email: 'principal@example.com',
       username: 'principal',
       password: 'password123',

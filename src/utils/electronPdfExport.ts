@@ -129,12 +129,13 @@ export const exportToPdf = async (
     let enhancedHtml = htmlContent;
     
     // Add essential page break styles if not present
+    // IMPORTANT: Only add @page if it doesn't exist - receipts have their own @page rules
     if (!enhancedHtml.includes('@page') && !enhancedHtml.includes('page-break-after')) {
       enhancedHtml = enhancedHtml.replace('</head>', `
         <style>
           @page {
             size: ${isLandscape ? 'A4 landscape' : 'A4 portrait'};
-            margin: 0 !important; /* No margins to allow content to extend to edges */
+            margin: 20mm 20mm 20mm 20mm; /* Safe print margins for reports */
           }
           .page-break { page-break-after: always; break-after: page; }
           .report-container { page-break-after: always; break-after: page; }
@@ -311,6 +312,7 @@ export const exportToPdf = async (
     }
     
     // Use optimized options for better page break handling
+    // IMPORTANT: preferCSSPageSize must be true to respect @page rules in CSS
     const options: ElectronPdfOptions = {
       format: 'A4',
       landscape: isLandscape,
@@ -321,7 +323,8 @@ export const exportToPdf = async (
         left: '0mm',
         right: '0mm'
       },
-      preferCSSPageSize: true
+      preferCSSPageSize: true,  // This allows CSS @page rules to override these settings
+      scale: 1.0
     };
     
     const result = await generatePDF(enhancedHtml, fileName, options);

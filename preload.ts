@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // App information
   getAppVersion: () => '1.0.0',
   
+  // Device tracking - get system information
+  getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
+  
   // Testing function to verify preload is working
   testPreload: () => 'الاتصال بواجهة برمجة التطبيقات ناجح!'
 });

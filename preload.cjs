@@ -34,6 +34,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Test function to verify preload is working
   testPreload: () => 'Preload script is working!',
   
+  // Device tracking - get system information
+  getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
+  
   // Send info to main process
   sendToMain: (channel, data) => {
     const validChannels = ['export-pdf', 'print-pdf', 'save-pdf', 'show-dialog', 'offline-services-ready', 'offline-services-error'];

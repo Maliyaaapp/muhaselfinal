@@ -217,7 +217,7 @@ const InstallmentPaymentInfoTooltip = ({ installment }: { installment: Installme
               )}
               {installment.paidByRole && (
                 <div className="text-gray-500">
-                  الدور: {installment.paidByRole === 'schoolAdmin' ? 'مدير المدرسة' : installment.paidByRole === 'gradeManager' ? 'مدير الصف' : installment.paidByRole}
+                  الدور: {installment.paidByRole === 'schoolAdmin' ? 'المدير المالي' : installment.paidByRole === 'gradeManager' ? 'مدير الصف' : installment.paidByRole}
                 </div>
               )}
               {installment.paidByEmail && (

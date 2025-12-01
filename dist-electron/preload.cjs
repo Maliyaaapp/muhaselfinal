@@ -34,6 +34,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Test function to verify preload is working
   testPreload: () => 'Preload script is working!',
   
+  // Device tracking - get system information
+  getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
+  
   // Send info to main process
   sendToMain: (channel, data) => {
     const validChannels = ['export-pdf', 'print-pdf', 'save-pdf', 'show-dialog', 'offline-services-ready', 'offline-services-error'];
@@ -114,12 +117,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ULTRA-FAST: Generate PDFs and save ZIP directly (no IPC transfer)
   playwrightBulkPdfToZip: (htmlContents, fileNames, zipPath) => {
     return ipcRenderer.invoke('playwright-bulk-pdf-to-zip', { htmlContents, fileNames, zipPath });
-  },
-  
-  // FAST: Single PDF generation using Playwright (reuses same browser instance)
-  // Returns PDF buffer for renderer to handle save dialog
-  playwrightSinglePdf: (html, fileName) => {
-    return ipcRenderer.invoke('playwright-single-pdf', { html, fileName });
   },
   
   // Version info

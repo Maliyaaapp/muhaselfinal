@@ -148,7 +148,7 @@ const Sidebar = ({ isOpen, toggleSidebar }: SidebarProps) => {
                 ) : user.role === 'admin' ? (
                   <span>مدير النظام</span>
                 ) : user.role === 'schoolAdmin' ? (
-                  <span>مدير المدرسة</span>
+                  <span>المدير المالي</span>
                 ) : user.role === 'teacher' ? (
                   <span>معلم</span>
                 ) : user.role === 'accountant' ? (
@@ -277,7 +277,7 @@ const Sidebar = ({ isOpen, toggleSidebar }: SidebarProps) => {
                       ) : user.role === 'admin' ? (
                         <span>مدير النظام</span>
                       ) : user.role === 'schoolAdmin' ? (
-                        <span>مدير المدرسة</span>
+                        <span>المدير المالي</span>
                       ) : user.role === 'teacher' ? (
                         <span>معلم</span>
                       ) : user.role === 'accountant' ? (

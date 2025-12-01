@@ -389,7 +389,7 @@ const SubscriptionsList = () => {
         await hybridApi.createMessage({
           studentId: 'admin',
           studentName: 'إدارة النظام',
-          grade: 'مدير المدرسة',
+          grade: 'المدير المالي',
           parentName: notifySchoolName,
           phone: notifyPhone,
           template: 'إشعار اشتراك',

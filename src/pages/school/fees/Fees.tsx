@@ -104,7 +104,7 @@ const PaymentInfoTooltip = ({ fee }: { fee: Fee }) => {
               )}
               {fee.paidByRole && (
                 <div className="text-gray-500">
-                  الدور: {fee.paidByRole === 'schoolAdmin' ? 'مدير المدرسة' : fee.paidByRole === 'gradeManager' ? 'مدير الصف' : fee.paidByRole}
+                  الدور: {fee.paidByRole === 'schoolAdmin' ? 'المدير المالي' : fee.paidByRole === 'gradeManager' ? 'مدير الصف' : fee.paidByRole}
                 </div>
               )}
               {fee.paidByEmail && (
@@ -447,6 +447,12 @@ const Fees = () => {
   useEffect(() => {
     // Create an async function inside the effect
     const initData = async () => {
+      // CRITICAL: Clear cache on mount to ensure fresh data
+      // This prevents showing stale data after partial payments
+      console.log('🔄 Fees page mounted - clearing cache for fresh data');
+      hybridApi.invalidateCache('fees');
+      hybridApi.invalidateCache('installments');
+      
       await fetchData();
     };
     
@@ -1637,10 +1643,57 @@ const Fees = () => {
     
     setPaymentProcessing(selectedFee.id);
     
-    try {
-      // CRITICAL FIX: Clear installments cache to ensure fresh data
-      console.log('🗑️ Clearing installments cache before payment processing');
-      hybridApi.invalidateCache('installments');
+    // ⚡ STEP 1: Calculate new values IMMEDIATELY (synchronous)
+    const feeNetAmount = selectedFee.amount - (selectedFee.discount || 0);
+    const newPaidAmount = selectedFee.paid + amount;
+    const newBalance = Math.max(0, feeNetAmount - newPaidAmount);
+    const newStatus = newPaidAmount === 0 ? 'unpaid' : (newBalance === 0 ? 'paid' : 'partial');
+    
+    console.log('⚡ OPTIMISTIC UPDATE:', {
+      previousPaid: selectedFee.paid,
+      paymentAmount: amount,
+      newPaidAmount,
+      newBalance,
+      newStatus
+    });
+    
+    // ⚡ STEP 2: Update UI IMMEDIATELY (before any database operations)
+    setFees(prevFees => prevFees.map(f => 
+      f.id === selectedFee.id ? { 
+        ...f, 
+        paid: newPaidAmount, 
+        balance: newBalance, 
+        status: newStatus as 'paid' | 'partial' | 'unpaid',
+        paymentDate: paymentDate || new Date().toISOString().split('T')[0], 
+        paymentMethod: paymentMethod as 'cash' | 'visa' | 'check' | 'bank-transfer' | 'other', 
+        paymentNote 
+      } : f
+    ));
+    
+    // ⚡ STEP 3: Close modal IMMEDIATELY
+    setPartialPaymentModalOpen(false);
+    setPaymentProcessing(null);
+    toast.success('تم دفع المبلغ بنجاح');
+    
+    // ⚡ STEP 4: Save to database in BACKGROUND (async, no await before UI update)
+    const savePaymentToDatabase = async () => {
+      try {
+        console.log('💾 Background save starting...');
+        
+        // Get device info for tracking (optional - won't fail if unavailable)
+        let deviceInfo = null;
+        try {
+          // @ts-ignore - getDeviceInfo exists but TypeScript needs server restart to see it
+          if (typeof hybridApi.getDeviceInfo === 'function') {
+            // @ts-ignore
+            deviceInfo = await hybridApi.getDeviceInfo();
+            console.log('🖥️ Device info:', deviceInfo);
+          }
+        } catch (err) {
+          console.warn('⚠️ Could not get device info:', err);
+        }
+        
+        hybridApi.invalidateCache('installments');
       
       // CRITICAL FIX: Update installments first, then recalculate fee totals from installments
       console.log('🔍 Fetching installments for fee:', selectedFee.id);
@@ -1685,16 +1738,33 @@ const Fees = () => {
         }
         
         // Find installments that match this fee (by fee_type and no existing fee_id)
-        const matchedInstallments = allStudentInstallments.filter((inst: any) => 
-          inst.feeType === selectedFee.feeType && !inst.feeId
-        );
+        // CRITICAL: Check both camelCase and snake_case versions
+        const matchedInstallments = allStudentInstallments.filter((inst: any) => {
+          const instFeeType = inst.feeType || inst.fee_type;
+          const instFeeId = inst.feeId || inst.fee_id;
+          const selectedFeeType = selectedFee.feeType || selectedFee.fee_type;
+          
+          return instFeeType === selectedFeeType && !instFeeId;
+        });
         
         console.log('📋 Found unlinked installments (no fee_id):', matchedInstallments.length);
+        if (matchedInstallments.length > 0) {
+          console.log('📋 Sample unlinked installment:', {
+            id: matchedInstallments[0].id,
+            feeType: matchedInstallments[0].feeType || matchedInstallments[0].fee_type,
+            feeId: matchedInstallments[0].feeId || matchedInstallments[0].fee_id,
+            amount: matchedInstallments[0].amount
+          });
+        }
         
         // Also try to find installments that might already be linked to this fee
-        const alreadyLinked = allStudentInstallments.filter((inst: any) => 
-          inst.feeType === selectedFee.feeType && inst.feeId === selectedFee.id
-        );
+        const alreadyLinked = allStudentInstallments.filter((inst: any) => {
+          const instFeeType = inst.feeType || inst.fee_type;
+          const instFeeId = inst.feeId || inst.fee_id;
+          const selectedFeeType = selectedFee.feeType || selectedFee.fee_type;
+          
+          return instFeeType === selectedFeeType && instFeeId === selectedFee.id;
+        });
         console.log('📋 Already linked installments:', alreadyLinked.length);
         
         if (matchedInstallments.length > 0) {
@@ -1703,11 +1773,23 @@ const Fees = () => {
           // Link them all in parallel
           await Promise.all(matchedInstallments.map(async (inst: any) => {
             try {
-              await hybridApi.saveInstallment({
+              const updateData = {
                 ...inst,
                 feeId: selectedFee.id,
-                studentId: selectedFee.studentId // Ensure student_id is set
+                fee_id: selectedFee.id, // Ensure snake_case is also set
+                studentId: selectedFee.studentId || (selectedFee as any).student_id,
+                student_id: selectedFee.studentId || (selectedFee as any).student_id,
+                schoolId: user?.schoolId || (selectedFee as any).school_id,
+                school_id: user?.schoolId || (selectedFee as any).school_id
+              };
+              
+              console.log('🔗 Linking installment:', {
+                id: inst.id.substring(0, 8),
+                feeId: selectedFee.id,
+                studentId: updateData.studentId
               });
+              
+              await hybridApi.saveInstallment(updateData);
               console.log('✅ Linked:', inst.id.substring(0, 8));
             } catch (error) {
               console.error('❌ Failed to link:', inst.id.substring(0, 8), error);
@@ -1720,6 +1802,34 @@ const Fees = () => {
           console.log('✅ Auto-linked', relatedInstallments.length, 'installments');
         } else {
           console.log('⚠️ No unlinked installments found for this fee type');
+          
+          // CRITICAL FIX: If no installments exist at all for this fee, create them now
+          if (allStudentInstallments.length === 0) {
+            console.log('🔧 No installments exist for this student - creating installment plan...');
+            
+            try {
+              // Create installment plan with default 9 installments
+              const installmentCount = 9;
+              const installmentsResponse = await hybridApi.createInstallmentPlan(
+                selectedFee,
+                installmentCount,
+                1 // monthly interval
+              );
+              
+              if (installmentsResponse?.success && installmentsResponse?.data) {
+                console.log('✅ Created', installmentsResponse.data.length, 'installments');
+                
+                // Re-fetch installments after creating
+                const reloadResponse = await hybridApi.getInstallments(undefined, undefined, selectedFee.id);
+                relatedInstallments = (reloadResponse?.success && reloadResponse?.data) ? reloadResponse.data : [];
+                console.log('✅ Loaded', relatedInstallments.length, 'newly created installments');
+              } else {
+                console.error('❌ Failed to create installments:', installmentsResponse?.error);
+              }
+            } catch (error) {
+              console.error('❌ Error creating installments:', error);
+            }
+          }
         }
       }
       
@@ -1778,7 +1888,7 @@ const Fees = () => {
           totalDistributed += paymentForThisInstallment;
           updatedPaidAmounts.set(installment.id, newPaidAmount); // Track the new amount
           
-          const updatedInstallment = {
+          const updatedInstallment: any = {
             id: installment.id,
             feeId: installment.feeId,
             studentId: installment.studentId,
@@ -1809,6 +1919,14 @@ const Fees = () => {
             paidById: user?.id || '',
             paymentRecordedAt: new Date().toISOString()
           };
+          
+          // Device tracking - only add if columns exist (optional feature)
+          if (deviceInfo?.computerName) {
+            updatedInstallment.paidFromComputer = deviceInfo.computerName;
+          }
+          if (deviceInfo?.windowsUsername) {
+            updatedInstallment.paidByWindowsUser = deviceInfo.windowsUsername;
+          }
           
           console.log('💾 Saving installment:', {
             id: updatedInstallment.id,
@@ -1871,7 +1989,7 @@ const Fees = () => {
         });
         
         // Update the fee with calculated values
-        const updatedFee = {
+        const updatedFee: any = {
           id: selectedFee.id,
           schoolId: user?.schoolId,
           studentId: selectedFee.studentId,
@@ -1901,6 +2019,14 @@ const Fees = () => {
           paymentRecordedAt: new Date().toISOString()
         };
         
+        // Device tracking - only add if columns exist (optional feature)
+        if (deviceInfo?.computerName) {
+          updatedFee.paidFromComputer = deviceInfo.computerName;
+        }
+        if (deviceInfo?.windowsUsername) {
+          updatedFee.paidByWindowsUser = deviceInfo.windowsUsername;
+        }
+        
         console.log('💾 Saving fee to database:', {
           id: updatedFee.id,
           paid: updatedFee.paid,
@@ -1929,18 +2055,7 @@ const Fees = () => {
         hybridApi.invalidateCache('installments');
         console.log('✅ Fee successfully saved and installments cache invalidated');
         
-        // Update local state immediately
-        setFees(prevFees => prevFees.map(f => 
-          f.id === selectedFee.id ? { 
-            ...f, 
-            paid: totalPaidFromInstallments, 
-            balance: newBalance, 
-            status: newStatus as 'paid' | 'partial' | 'unpaid',
-            paymentDate, 
-            paymentMethod: paymentMethod as 'cash' | 'visa' | 'check' | 'bank-transfer' | 'other', 
-            paymentNote 
-          } : f
-        ));
+        console.log('✅ Fee with installments saved successfully');
       } else {
         // No installments exist - this is a fee without installment plan
         // Just update the fee directly with the payment
@@ -1960,7 +2075,7 @@ const Fees = () => {
           newStatus
         });
         
-        const updatedFee = {
+        const updatedFee: any = {
           id: selectedFee.id,
           schoolId: user?.schoolId,
           studentId: selectedFee.studentId,
@@ -1990,6 +2105,14 @@ const Fees = () => {
           paymentRecordedAt: new Date().toISOString()
         };
         
+        // Device tracking - only add if columns exist (optional feature)
+        if (deviceInfo?.computerName) {
+          updatedFee.paidFromComputer = deviceInfo.computerName;
+        }
+        if (deviceInfo?.windowsUsername) {
+          updatedFee.paidByWindowsUser = deviceInfo.windowsUsername;
+        }
+        
         console.log('💾 Saving fee (no installments):', updatedFee);
         
         const updateResponse = await hybridApi.saveFee(updatedFee);
@@ -2000,33 +2123,47 @@ const Fees = () => {
           throw new Error('Failed to update fee: ' + updateResponse.error);
         }
         
-        // Update local state immediately
+        console.log('✅ Fee without installments saved successfully');
+      }
+      
+        // CRITICAL: Wait for database to fully process before clearing cache
+        // This prevents background refresh from fetching stale data
+        console.log('⏳ Waiting for database to process...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Clear caches to force fresh fetch on next page load
+        console.log('🗑️ Clearing caches...');
+        hybridApi.invalidateCache('fees');
+        hybridApi.invalidateCache('installments');
+        
+        console.log('✅ Background save completed successfully');
+      } catch (error) {
+        console.error('❌ Background save failed:', error);
+        
+        // ⚠️ ROLLBACK: Restore previous values on error
+        console.log('⚠️ Rolling back UI to previous state...');
         setFees(prevFees => prevFees.map(f => 
           f.id === selectedFee.id ? { 
             ...f, 
-            paid: newPaidAmount, 
-            balance: newBalance, 
-            status: newStatus as 'paid' | 'partial' | 'unpaid',
-            paymentDate, 
-            paymentMethod: paymentMethod as 'cash' | 'visa' | 'check' | 'bank-transfer' | 'other', 
-            paymentNote 
+            paid: selectedFee.paid, // Restore original
+            balance: selectedFee.balance, // Restore original
+            status: selectedFee.status, // Restore original
+            paymentDate: selectedFee.paymentDate,
+            paymentMethod: selectedFee.paymentMethod,
+            paymentNote: selectedFee.paymentNote
           } : f
         ));
         
-        console.log('✅ Local state updated');
+        toast.error('فشل حفظ الدفع - تم التراجع عن التغييرات');
+        setAlertMessage('حدث خطأ أثناء حفظ الدفع في قاعدة البيانات');
+        setAlertOpen(true);
       }
-      
-      // Close modal and show success
-      setPartialPaymentModalOpen(false);
-      setPaymentProcessing(null);
-      toast.success('تم دفع المبلغ بنجاح');
-    } catch (error) {
-      console.error('❌ Error processing partial payment:', error);
-      setAlertMessage('حدث خطأ أثناء معالجة الدفع الجزئي');
-      setAlertOpen(true);
-      setPaymentProcessing(null);
-      setPartialPaymentModalOpen(false);
-    }
+    };
+    
+    // ⚡ STEP 5: Execute background save (fire and forget)
+    savePaymentToDatabase().catch(err => {
+      console.error('❌ Unhandled error in background save:', err);
+    });
   };
   
   // Add a new handler for printing partial payment receipts
@@ -2425,9 +2562,9 @@ const Fees = () => {
         paymentNote: currentFee.paymentNote || '',
         checkNumber: currentFee.checkNumber || '',
         checkDate: currentFee.checkDate || '',
-        bankName: currentFee.bankName || '',
-        bankNameArabic: currentFee.bankNameArabic || '',
-        bankNameEnglish: currentFee.bankNameEnglish || '',
+        bankName: currentFee.bankNameEnglish || currentFee.bankName || '',
+        bankNameArabic: currentFee.bankNameArabic || currentFee.bankName || '',
+        bankNameEnglish: currentFee.bankNameEnglish || currentFee.bankName || '',
         isPartialPayment: currentFee.status === 'partial'
       };
       

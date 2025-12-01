@@ -148,7 +148,7 @@ const Tracker = () => {
   const getRoleLabel = (role?: string) => {
     if (!role) return '-';
     switch (role) {
-      case 'schoolAdmin': return 'مدير المدرسة';
+      case 'schoolAdmin': return 'المدير المالي';
       case 'gradeManager': return 'مدير الصف';
       case 'admin': return 'مسؤول النظام';
       default: return role;
@@ -405,7 +405,7 @@ const Tracker = () => {
           <select value={filterRole} onChange={(e) => setFilterRole(e.target.value)}
             className="px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-[#800000]/20 focus:border-[#800000] bg-white">
             <option value="all">كل الأدوار</option>
-            <option value="schoolAdmin">مدير المدرسة</option>
+            <option value="schoolAdmin">المدير المالي</option>
             <option value="gradeManager">مدير الصف</option>
           </select>
           <select value={dateRange} onChange={(e) => setDateRange(e.target.value)}

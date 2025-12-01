@@ -42,6 +42,121 @@ setInterval(() => {
   }
 }, 30000);
 
+// ============= BROWSERWINDOW POOL FOR FAST PDF GENERATION =============
+// Reusable pool of hidden BrowserWindows for instant PDF generation
+class ReceiptWindowPool {
+  constructor(poolSize = 2) {
+    this.poolSize = poolSize;
+    this.availableWindows = [];
+    this.busyWindows = new Set();
+    this.initialized = false;
+    this.initPromise = null;
+  }
+
+  async init() {
+    if (this.initialized) return;
+    if (this.initPromise) return this.initPromise;
+    
+    this.initPromise = this._createPool();
+    await this.initPromise;
+    this.initialized = true;
+    console.log(`[ReceiptPool] Initialized with ${this.poolSize} windows`);
+  }
+
+  async _createPool() {
+    const { BrowserWindow } = require('electron');
+    
+    for (let i = 0; i < this.poolSize; i++) {
+      const win = this._createWindow(BrowserWindow);
+      this.availableWindows.push(win);
+    }
+  }
+
+  _createWindow(BrowserWindow) {
+    const win = new BrowserWindow({
+      width: 800,
+      height: 1200,
+      show: false,
+      webPreferences: {
+        offscreen: true,
+        nodeIntegration: false,
+        contextIsolation: true
+      }
+    });
+    
+    // Handle window crash - recreate it
+    win.webContents.on('crashed', () => {
+      console.log('[ReceiptPool] Window crashed, will recreate on next use');
+      this._removeWindow(win);
+    });
+    
+    return win;
+  }
+
+  _removeWindow(win) {
+    this.availableWindows = this.availableWindows.filter(w => w !== win);
+    this.busyWindows.delete(win);
+    try { win.destroy(); } catch {}
+  }
+
+  async getWindow() {
+    if (!this.initialized) await this.init();
+    
+    // If available window exists, use it
+    if (this.availableWindows.length > 0) {
+      const win = this.availableWindows.pop();
+      this.busyWindows.add(win);
+      return win;
+    }
+    
+    // If all windows are busy, create a temporary one
+    console.log('[ReceiptPool] All windows busy, creating temporary window');
+    const { BrowserWindow } = require('electron');
+    const tempWin = this._createWindow(BrowserWindow);
+    this.busyWindows.add(tempWin);
+    return tempWin;
+  }
+
+  releaseWindow(win) {
+    if (!win || win.isDestroyed()) {
+      this.busyWindows.delete(win);
+      // Replenish pool if needed
+      if (this.availableWindows.length < this.poolSize) {
+        const { BrowserWindow } = require('electron');
+        this.availableWindows.push(this._createWindow(BrowserWindow));
+      }
+      return;
+    }
+    
+    this.busyWindows.delete(win);
+    
+    // If pool is full, destroy this window
+    if (this.availableWindows.length >= this.poolSize) {
+      try { win.destroy(); } catch {}
+      return;
+    }
+    
+    // Return to pool
+    this.availableWindows.push(win);
+  }
+
+  cleanup() {
+    console.log('[ReceiptPool] Cleaning up all windows');
+    for (const win of this.availableWindows) {
+      try { win.destroy(); } catch {}
+    }
+    for (const win of this.busyWindows) {
+      try { win.destroy(); } catch {}
+    }
+    this.availableWindows = [];
+    this.busyWindows.clear();
+    this.initialized = false;
+  }
+}
+
+// Global pool instance
+const receiptWindowPool = new ReceiptWindowPool(2);
+
 // Disable console logging in production
 if (process.env.NODE_ENV === 'production') {
   console.log = () => {};
@@ -401,42 +516,53 @@ const registerPdfHandlers = async () => {
   
   // Handle PDF generation request from renderer process
   ipcMain.handle('generate-pdf', async (event, { html, fileName, options }) => {
+    const startTime = Date.now();
+    let poolWindow = null;
+    let tempFile = null;
+    
     try {
       const fs = require('fs');
       const path = require('path');
-      const { BrowserWindow, dialog } = require('electron');
+      const { dialog } = require('electron');
       
-      // Create a temporary hidden window
-      const tempWin = new BrowserWindow({ 
-        width: 800,
-        height: 1200,
-        show: false,
-        webPreferences: {
-          offscreen: true,
-          nodeIntegration: false,
-          contextIsolation: true
-        }
-      });
+      // Get window from pool (instant, no creation delay)
+      poolWindow = await receiptWindowPool.getWindow();
+      console.log(`[ReceiptPool] Got window in ${Date.now() - startTime}ms`);
       
       // Write the HTML content to a temporary file
-      const tempFile = path.join(app.getPath('temp'), `temp_pdf_${Date.now()}.html`);
+      tempFile = path.join(app.getPath('temp'), `temp_pdf_${Date.now()}.html`);
       fs.writeFileSync(tempFile, html);
       
-      // Load the HTML file (not data URL) to ensure all styles are properly loaded
-      await tempWin.loadFile(tempFile);
+      // Load the HTML file
+      await poolWindow.loadFile(tempFile);
       
-      // Wait for rendering to complete
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Give it time to render
+      // Reduced wait time since window is already warmed up
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Translate options to Electron printToPDF format
+      const pdfOptions = {
+        printBackground: options?.printBackground !== false,
+        landscape: options?.landscape || false,
+        pageSize: options?.format || options?.pageSize || 'A4',
+        margins: { marginType: 'none' }, // Use 'none' for zero margins to match CSS @page
+        preferCSSPageSize: options?.preferCSSPageSize !== false, // Let CSS control page size
+        scale: options?.scale || 1.0
+      };
+      
+      console.log('[PDF] Using options:', JSON.stringify(pdfOptions));
       
       // Generate PDF
-      const pdf = await tempWin.webContents.printToPDF(options);
+      const pdf = await poolWindow.webContents.printToPDF(pdfOptions);
+      console.log(`[ReceiptPool] PDF generated in ${Date.now() - startTime}ms`);
       
-      // Close the temporary window
-      tempWin.close();
+      // Release window back to pool immediately (don't wait for save dialog)
+      receiptWindowPool.releaseWindow(poolWindow);
+      poolWindow = null;
       
       // Clean up the temporary file
       try {
         fs.unlinkSync(tempFile);
+        tempFile = null;
       } catch (err) {
         console.warn('Failed to delete temporary file:', err);
       }
@@ -452,9 +578,18 @@ const registerPdfHandlers = async () => {
       // Save the PDF
       fs.writeFileSync(filePath, pdf);
       
+      console.log(`[ReceiptPool] Total time: ${Date.now() - startTime}ms`);
       return { success: true, filePath };
     } catch (error) {
       console.error('Error generating PDF:', error);
+      // Release window back to pool on error
+      if (poolWindow) {
+        receiptWindowPool.releaseWindow(poolWindow);
+      }
+      // Clean up temp file on error
+      if (tempFile) {
+        try { fs.unlinkSync(tempFile); } catch {}
+      }
       return { success: false, error: error.message };
     }
   });
@@ -476,50 +611,46 @@ const registerPdfHandlers = async () => {
     }
   });
 
-  // Handle PDF printing with specific path
+  // Handle PDF printing with specific path - uses pool for speed
   ipcMain.handle('print-to-pdf-with-path', async (event, { content, filePath, options }) => {
+    let poolWindow = null;
+    let tempFile = null;
+    
     try {
       console.log(`Printing PDF to path: ${filePath}`);
       
-      // Create a temporary hidden window to properly render the HTML content
-      const tempWindow = new BrowserWindow({
-        width: 800,
-        height: 1200,
-        show: false, // Keep it hidden
-        webPreferences: {
-          offscreen: true,
-          nodeIntegration: false,
-          contextIsolation: true
-        }
-      });
+      // Get window from pool
+      poolWindow = await receiptWindowPool.getWindow();
       
       // Write the HTML content to a temporary file
-      const tempFile = path.join(app.getPath('temp'), `temp_pdf_path_${Date.now()}.html`);
+      tempFile = path.join(app.getPath('temp'), `temp_pdf_path_${Date.now()}.html`);
       fs.writeFileSync(tempFile, content);
       
-      // Load the HTML file (not data URL) to ensure all styles are properly loaded
-      await tempWindow.loadFile(tempFile);
+      // Load the HTML file
+      await poolWindow.loadFile(tempFile);
       
-      // Wait for rendering to complete
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Give it time to render
+      // Reduced wait time since window is already warmed up
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Translate options to Electron printToPDF format
+      const pdfOptions = {
+        printBackground: options?.printBackground !== false,
+        landscape: options?.landscape || false,
+        pageSize: options?.format || options?.pageSize || 'A4',
+        margins: { marginType: 'none' }, // Use 'none' for zero margins to match CSS @page
+        preferCSSPageSize: options?.preferCSSPageSize !== false,
+        scale: options?.scale || 1.0
+      };
       
       // Generate PDF
-      const data = await tempWindow.webContents.printToPDF(options || {
-        printBackground: true,
-        landscape: false,
-        margins: { marginType: 'custom', top: 0, bottom: 0, left: 0, right: 0 },
-        pageSize: 'A4'
-      });
+      const data = await poolWindow.webContents.printToPDF(pdfOptions);
       
-      // Close the temporary window
-      tempWindow.close();
+      // Release window back to pool
+      receiptWindowPool.releaseWindow(poolWindow);
+      poolWindow = null;
       
       // Clean up the temporary file
-      try {
-        fs.unlinkSync(tempFile);
-      } catch (err) {
-        console.warn('Failed to delete temporary file:', err);
-      }
+      try { fs.unlinkSync(tempFile); } catch {}
       
       // Save the PDF to the specified path
       fs.writeFileSync(filePath, data);
@@ -527,54 +658,52 @@ const registerPdfHandlers = async () => {
       return { success: true, filePath };
     } catch (error) {
       console.error('Error printing to PDF:', error);
+      if (poolWindow) receiptWindowPool.releaseWindow(poolWindow);
+      if (tempFile) try { fs.unlinkSync(tempFile); } catch {}
       return { success: false, error: error.message };
     }
   });
 
-  // Handle direct PDF saving without dialog
+  // Handle direct PDF saving without dialog - uses pool for speed
   ipcMain.handle('direct-save-pdf', async (event, { content, fileName, options }) => {
+    let poolWindow = null;
+    let tempFile = null;
+    
     try {
       console.log(`Direct save PDF as: ${fileName}`);
       
-      // Create a temporary hidden window to properly render the HTML content
-      const tempWindow = new BrowserWindow({
-        width: 800,
-        height: 1200,
-        show: false, // Keep it hidden
-        webPreferences: {
-          offscreen: true,
-          nodeIntegration: false,
-          contextIsolation: true
-        }
-      });
+      // Get window from pool
+      poolWindow = await receiptWindowPool.getWindow();
       
       // Write the HTML content to a temporary file
-      const tempFile = path.join(app.getPath('temp'), `temp_receipt_${Date.now()}.html`);
+      tempFile = path.join(app.getPath('temp'), `temp_receipt_${Date.now()}.html`);
       fs.writeFileSync(tempFile, content);
       
-      // Load the HTML file (not data URL) to ensure all styles are properly loaded
-      await tempWindow.loadFile(tempFile);
+      // Load the HTML file
+      await poolWindow.loadFile(tempFile);
       
-      // Wait for rendering to complete
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Give it time to render
+      // Reduced wait time since window is already warmed up
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Translate options to Electron printToPDF format
+      const pdfOptions = {
+        printBackground: options?.printBackground !== false,
+        landscape: options?.landscape || false,
+        pageSize: options?.format || options?.pageSize || 'A4',
+        margins: { marginType: 'none' },
+        preferCSSPageSize: options?.preferCSSPageSize !== false,
+        scale: options?.scale || 1.0
+      };
       
       // Generate PDF from the rendered content
-      const data = await tempWindow.webContents.printToPDF(options || {
-        printBackground: true,
-        landscape: false,
-        margins: { marginType: 'custom', top: 0, bottom: 0, left: 0, right: 0 },
-        pageSize: 'A4'
-      });
+      const data = await poolWindow.webContents.printToPDF(pdfOptions);
       
-      // Close the temporary window
-      tempWindow.close();
+      // Release window back to pool
+      receiptWindowPool.releaseWindow(poolWindow);
+      poolWindow = null;
       
       // Clean up the temporary file
-      try {
-        fs.unlinkSync(tempFile);
-      } catch (err) {
-        console.warn('Failed to delete temporary file:', err);
-      }
+      try { fs.unlinkSync(tempFile); } catch {}
       
       // Let the user choose where to save the file
       const { canceled, filePath } = await dialog.showSaveDialog({
@@ -593,6 +722,8 @@ const registerPdfHandlers = async () => {
       }
     } catch (error) {
       console.error('Error with direct save PDF:', error);
+      if (poolWindow) receiptWindowPool.releaseWindow(poolWindow);
+      if (tempFile) try { fs.unlinkSync(tempFile); } catch {}
       return { success: false, error: error.message };
     }
   });
@@ -658,6 +789,38 @@ const registerPdfHandlers = async () => {
     }
   });
 
+  // Get system information for device tracking
+  ipcMain.handle('get-system-info', async () => {
+    try {
+      const os = require('os');
+      
+      const systemInfo = {
+        computerName: os.hostname(),
+        username: os.userInfo().username,
+        platform: os.platform(),
+        osVersion: os.release(),
+        osType: os.type(),
+        arch: os.arch(),
+        totalMemory: os.totalmem(),
+        freeMemory: os.freemem(),
+        cpus: os.cpus().length,
+        networkInterfaces: Object.keys(os.networkInterfaces()),
+        timestamp: new Date().toISOString()
+      };
+      
+      console.log('[SystemInfo] Retrieved:', {
+        computerName: systemInfo.computerName,
+        username: systemInfo.username,
+        platform: systemInfo.platform
+      });
+      
+      return { success: true, data: systemInfo };
+    } catch (error) {
+      console.error('Error getting system info:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   // Provide temp directory path
   ipcMain.handle('get-temp-dir', async () => {
     try {
@@ -695,33 +858,45 @@ const registerPdfHandlers = async () => {
     }
   });
 
-  // Generate PDF bytes without saving (for zipping)
+  // Generate PDF bytes without saving (for zipping) - uses pool for speed
   ipcMain.handle('generate-pdf-bytes', async (event, { html, options }) => {
+    let poolWindow = null;
+    let tempFile = null;
+    
     try {
-      const { BrowserWindow } = require('electron');
       const fs = require('fs');
       const path = require('path');
-      const tempWindow = new BrowserWindow({
-        width: 800,
-        height: 1200,
-        show: false,
-        webPreferences: { offscreen: true, nodeIntegration: false, contextIsolation: true }
-      });
-      const tempFile = path.join(app.getPath('temp'), `temp_pdf_bytes_${Date.now()}.html`);
+      
+      // Get window from pool
+      poolWindow = await receiptWindowPool.getWindow();
+      
+      tempFile = path.join(app.getPath('temp'), `temp_pdf_bytes_${Date.now()}.html`);
       fs.writeFileSync(tempFile, html);
-      await tempWindow.loadFile(tempFile);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      const data = await tempWindow.webContents.printToPDF(options || {
-        printBackground: true,
-        landscape: false,
-        margins: { marginType: 'custom', top: 0, bottom: 0, left: 0, right: 0 },
-        pageSize: 'A4'
-      });
-      tempWindow.close();
+      await poolWindow.loadFile(tempFile);
+      await new Promise(resolve => setTimeout(resolve, 300)); // Reduced wait time
+      
+      // Translate options to Electron printToPDF format
+      const pdfOptions = {
+        printBackground: options?.printBackground !== false,
+        landscape: options?.landscape || false,
+        pageSize: options?.format || options?.pageSize || 'A4',
+        margins: { marginType: 'none' },
+        preferCSSPageSize: options?.preferCSSPageSize !== false,
+        scale: options?.scale || 1.0
+      };
+      
+      const data = await poolWindow.webContents.printToPDF(pdfOptions);
+      
+      // Release window back to pool
+      receiptWindowPool.releaseWindow(poolWindow);
+      poolWindow = null;
+      
       try { fs.unlinkSync(tempFile); } catch {}
       return { success: true, data };
     } catch (error) {
       console.error('Error generating PDF bytes:', error);
+      if (poolWindow) receiptWindowPool.releaseWindow(poolWindow);
+      if (tempFile) try { fs.unlinkSync(tempFile); } catch {}
       return { success: false, error: error.message };
     }
   });
@@ -1031,67 +1206,6 @@ const registerPdfHandlers = async () => {
     }
   });
 
-  // FAST: Single PDF generation using Playwright (reuses same browser instance)
-  ipcMain.handle('playwright-single-pdf', async (event, { html, fileName }) => {
-    const startTime = Date.now();
-    console.log(`[Playwright-Single] Generating: ${fileName}`);
-    
-    try {
-      const { context, reused } = await getOrCreateBrowser();
-      if (reused) {
-        console.log('[Playwright-Single] Reusing browser instance');
-      }
-      
-      // Create a single page for this PDF
-      const page = await context.newPage();
-      
-      try {
-        // Set content with minimal wait
-        await page.setContent(html, { 
-          waitUntil: 'commit',
-          timeout: 10000
-        });
-        
-        // Generate PDF in memory
-        const pdfBuffer = await page.pdf({
-          format: 'A4',
-          printBackground: true,
-          margin: { top: '0', bottom: '0', left: '0', right: '0' }
-        });
-        
-        // Validate PDF
-        if (pdfBuffer.length < 500) {
-          throw new Error('PDF too small - generation may have failed');
-        }
-        
-        const elapsed = Date.now() - startTime;
-        console.log(`[Playwright-Single] Generated in ${elapsed}ms (${pdfBuffer.length} bytes)`);
-        
-        // Return buffer to renderer for save dialog
-        return { 
-          success: true, 
-          data: pdfBuffer,
-          fileName,
-          elapsed 
-        };
-        
-      } finally {
-        // Always close the page
-        await page.close().catch(() => {});
-      }
-      
-    } catch (error) {
-      console.error('[Playwright-Single] Error:', error);
-      // Reset browser on error
-      if (_playwrightBrowser) {
-        try { await _playwrightBrowser.close(); } catch {}
-        _playwrightBrowser = null;
-        _playwrightContext = null;
-      }
-      return { success: false, error: error.message };
-    }
-  });
-
   console.log('PDF export handlers registered successfully');
 };
 
@@ -1104,6 +1218,13 @@ app.whenReady().then(async () => {
   
   // Pre-warm Playwright browser immediately for instant PDF generation
   warmUpBrowser();
+  
+  // Initialize BrowserWindow pool for fast single PDF generation
+  receiptWindowPool.init().then(() => {
+    console.log('[ReceiptPool] Ready for instant PDF generation');
+  }).catch(err => {
+    console.error('[ReceiptPool] Failed to initialize:', err);
+  });
 
   // On macOS it's common to re-create a window when the dock icon is clicked
   app.on('activate', () => {
@@ -1111,6 +1232,11 @@ app.whenReady().then(async () => {
       createWindow();
     }
   });
+});
+
+// Cleanup pool before app quits
+app.on('before-quit', () => {
+  receiptWindowPool.cleanup();
 });
 
 // Quit when all windows are closed, except on macOS
