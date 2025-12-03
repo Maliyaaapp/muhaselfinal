@@ -478,15 +478,17 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
     return false;
   })();
   // For combined receipts, base totals on the current fee record to avoid double-counting
-  const combinedTotalAmount = Math.max(0, Number((data as any).totalAmount ?? (data as any).amount ?? 0));
+  const combinedTotalAmountBeforeDiscount = Math.max(0, Number((data as any).totalAmount ?? (data as any).amount ?? 0));
+  // Apply discount to get the actual total amount after discount
+  const combinedTotalAmount = Math.max(0, combinedTotalAmountBeforeDiscount - discountAmount);
   const explicitPaid = Number((data as any).paidAmount ?? (data as any).amount ?? 0);
   const explicitRemaining = Number((data as any).remainingAmount ?? (data as any).balance ?? 0);
   // Determine if fully paid using explicit fields first
   const combinedFullyPaid = (data.status === 'paid') || (explicitRemaining === 0) || (!data.isPartialPayment && explicitPaid >= combinedTotalAmount);
-  // Paid/remaining amounts for combined receipts
+  // Paid/remaining amounts for combined receipts - should reflect amounts AFTER discount
   const combinedPaidAmount = combinedFullyPaid ? combinedTotalAmount : Math.max(0, explicitPaid);
   const combinedRemainingAmount = combinedFullyPaid ? 0 : Math.max(0, explicitRemaining || (combinedTotalAmount - combinedPaidAmount));
-  // Displayed amount should reflect the combined fee total for this record
+  // Displayed amount should reflect the combined fee total AFTER discount
   const combinedDisplayedAmount = combinedTotalAmount;
   
   return `
@@ -499,7 +501,7 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
       <meta name="print-color-adjust" content="exact">
       <title>${isArabic ? 'إيصال دفع' : 'Payment Receipt'} - ${data.studentName}</title>
       <style>
-        @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700&display=swap');
+        /* Use system Arabic fonts - no external font loading for faster PDF generation */
         
         /* Modern CSS Variables */
         :root {
@@ -507,7 +509,7 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
           --glass-bg: rgba(255, 255, 255, 0.1);
           --shadow-soft: 0 8px 32px rgba(0, 0, 0, 0.1);
           --border-radius: 12px;
-          --font-family: 'Tajawal', -apple-system, BlinkMacSystemFont, sans-serif;
+          --font-family: 'Segoe UI', 'Arial', 'Tahoma', sans-serif;
         }
         
         /* CSS Reset */
@@ -1564,7 +1566,7 @@ export const generateReceiptHTML = async (data: ReceiptData): Promise<string> =>
                 </tr>
               ` : `
                 ${isCombinedReceipt ? `
-                <!-- Combined fees breakdown -->
+                <!-- Combined fees breakdown - amounts shown AFTER discount -->
                 <tr>
                   <td>${isArabic ? 'رسوم مدمجة' : 'Combined Fees'}</td>
                   <td class="fee-amount">${Math.round(combinedDisplayedAmount).toLocaleString('en-US')} ${currencySymbol}</td>

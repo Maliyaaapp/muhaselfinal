@@ -792,9 +792,9 @@ const EnglishReceiptButton: React.FC<EnglishReceiptButtonProps> = ({ receiptData
             </thead>
           <tbody>
               ${isCombinedReceipt ? `
-              <!-- Combined fees receipt (English) - Single row for total fees -->
+              <!-- Combined fees receipt (English) - Same format as Arabic -->
               <tr>
-                <td>Total Fees (Tuition & Transportation)</td>
+                <td>Combined Fees</td>
                 <td class="fee-amount">${combinedTotalAmount.toFixed(2)} ${currencySymbol}</td>
               </tr>
               
@@ -804,7 +804,7 @@ const EnglishReceiptButton: React.FC<EnglishReceiptButtonProps> = ({ receiptData
               </tr>
               
               <tr style="background-color: #fff5f5; color: #C53030; font-weight: bold;">
-                <td><strong>Remaining Amount</strong></td>
+                <td><strong>Total Remaining Amount</strong></td>
                 <td class="fee-amount"><strong>${combinedRemainingAmount.toFixed(2)} ${currencySymbol}</strong></td>
               </tr>
               ` : (isTransportationReceipt || (englishFeeType && (englishFeeType.includes('Transportation Fees') || englishFeeType.includes('نقل'))))
@@ -826,20 +826,48 @@ const EnglishReceiptButton: React.FC<EnglishReceiptButtonProps> = ({ receiptData
               </tr>
               `
               : `
-              <!-- Standard receipt - use combined total for simplicity -->
+              <!-- Standard receipt - Detailed breakdown like Arabic -->
+              ${tuitionAfterDiscount > 0 ? `
               <tr>
-                <td>Total Fees</td>
-                <td class="fee-amount">${combinedTotalAmount.toFixed(2)} ${currencySymbol}</td>
+                <td>Tuition Fees</td>
+                <td class="fee-amount">${tuitionAfterDiscount.toFixed(2)} ${currencySymbol}</td>
+              </tr>
+              ` : ''}
+              
+              ${transportationAmount > 0 ? `
+              <tr>
+                <td>Transportation Fees</td>
+                <td class="fee-amount">${transportationAmount.toFixed(2)} ${currencySymbol}</td>
+              </tr>
+              ` : ''}
+              
+              <tr style="background-color: #f0f0f0; font-weight: bold;">
+                <td><strong>Total Amount</strong></td>
+                <td class="fee-amount"><strong>${totalFeesAmount.toFixed(2)} ${currencySymbol}</strong></td>
               </tr>
               
               <tr style="background-color: #d4edda; color: #155724; font-weight: bold;">
                 <td><strong>Amount Paid</strong></td>
-                <td class="fee-amount"><strong>${combinedPaidAmount.toFixed(2)} ${currencySymbol}</strong></td>
+                <td class="fee-amount"><strong>${(tuitionPaidAmount + transportationPaidAmount).toFixed(2)} ${currencySymbol}</strong></td>
               </tr>
               
+              ${tuitionAfterDiscount > 0 ? `
+              <tr style="background-color: #fff5f5; color: #C53030;">
+                <td>Remaining Tuition Fees</td>
+                <td class="fee-amount">${tuitionRemainingAmount.toFixed(2)} ${currencySymbol}</td>
+              </tr>
+              ` : ''}
+              
+              ${transportationAmount > 0 ? `
+              <tr style="background-color: #fff5f5; color: #C53030;">
+                <td>Remaining Transportation Fees</td>
+                <td class="fee-amount">${transportationRemainingAmount.toFixed(2)} ${currencySymbol}</td>
+              </tr>
+              ` : ''}
+              
               <tr style="background-color: #fff5f5; color: #C53030; font-weight: bold;">
-                <td><strong>Remaining Amount</strong></td>
-                <td class="fee-amount"><strong>${combinedRemainingAmount.toFixed(2)} ${currencySymbol}</strong></td>
+                <td><strong>Total Remaining Amount</strong></td>
+                <td class="fee-amount"><strong>${totalRemainingAmount.toFixed(2)} ${currencySymbol}</strong></td>
               </tr>
               `}
             </tbody>
@@ -861,7 +889,7 @@ const EnglishReceiptButton: React.FC<EnglishReceiptButtonProps> = ({ receiptData
       </div>
       
       <style>
-        @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700&display=swap');
+        /* Use system fonts - no external font loading for faster PDF generation */
         
         /* Modern CSS Variables */
         :root {
@@ -869,7 +897,7 @@ const EnglishReceiptButton: React.FC<EnglishReceiptButtonProps> = ({ receiptData
           --glass-bg: rgba(255, 255, 255, 0.1);
           --shadow-soft: 0 8px 32px rgba(0, 0, 0, 0.1);
           --border-radius: 12px;
-          --font-family: 'Tajawal', -apple-system, BlinkMacSystemFont, sans-serif;
+          --font-family: 'Segoe UI', 'Arial', 'Tahoma', sans-serif;
         }
         
         /* CSS Reset */
@@ -1828,7 +1856,6 @@ const EnglishReceiptButton: React.FC<EnglishReceiptButtonProps> = ({ receiptData
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
   <title>English Receipt</title>
-  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700&display=swap" rel="stylesheet">
   <style>
     @page {
       size: 210mm 297mm;
@@ -1845,7 +1872,7 @@ const EnglishReceiptButton: React.FC<EnglishReceiptButtonProps> = ({ receiptData
     }
     
     body {
-      font-family: 'Tajawal', Arial, sans-serif;
+      font-family: 'Segoe UI', Arial, sans-serif;
       direction: ltr;
       text-align: left;
       margin: 0;

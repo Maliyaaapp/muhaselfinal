@@ -25,14 +25,14 @@ export const generateSubscriptionInvoiceHTML = (data: SubscriptionInvoiceData): 
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>فاتورة اشتراك - ${data.schoolName}</title>
       <style>
-        @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap');
+        /* Use system fonts - no external font loading for faster PDF generation */
         
         /* Reset and Base Styles */
         * {
           box-sizing: border-box;
           margin: 0;
           padding: 0;
-          font-family: 'Tajawal', sans-serif;
+          font-family: 'Segoe UI', Arial, sans-serif;
         }
         
         @page {
@@ -48,7 +48,7 @@ export const generateSubscriptionInvoiceHTML = (data: SubscriptionInvoiceData): 
         body {
           margin: 0;
           padding: 0;
-          font-family: 'Tajawal', sans-serif;
+          font-family: 'Segoe UI', Arial, sans-serif;
           font-size: 14px;
           line-height: 1.5;
           color: #2D3748;
@@ -467,7 +467,7 @@ export const generateSubscriptionInvoiceHTML = (data: SubscriptionInvoiceData): 
         </div>
         
         <div class="no-print" style="margin-top: 20px; text-align: center;">
-          <button onclick="window.print()" style="padding: 10px 20px; background-color: #800000; color: white; border: none; border-radius: 5px; cursor: pointer; font-family: 'Tajawal', sans-serif;">
+          <button onclick="window.print()" style="padding: 10px 20px; background-color: #800000; color: white; border: none; border-radius: 5px; cursor: pointer; font-family: 'Segoe UI', Arial, sans-serif;">
             طباعة الفاتورة
           </button>
         </div>

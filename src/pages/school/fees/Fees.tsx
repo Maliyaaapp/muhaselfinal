@@ -499,19 +499,20 @@ const Fees = () => {
         clearRefreshNeeded('fees');
         
         // CRITICAL: Wait for database to fully commit before fetching
-        console.log('[Fees] ⏳ Waiting 800ms for database to commit...');
-        await new Promise(resolve => setTimeout(resolve, 800));
+        console.log('[Fees] ⏳ Waiting 500ms for database to commit...');
+        await new Promise(resolve => setTimeout(resolve, 500));
         
-        // Clear ALL caches to force fresh fetch from Supabase
-        console.log('[Fees] 🗑️ Clearing all caches...');
-        await hybridApi.clearCache();
+        // CRITICAL FIX: Force fresh fetch from Supabase
+        console.log('[Fees] 🗑️ Force fetching fresh data from Supabase...');
+        await hybridApi.forceFreshFetch('fees');
+        await hybridApi.forceFreshFetch('installments');
+        await hybridApi.forceFreshFetch('students');
+      } else {
+        // Normal mount - just invalidate cache (keeps localStorage as fallback)
+        console.log('🔄 Fees page mounted - clearing cache for fresh data');
+        hybridApi.invalidateCache('fees');
+        hybridApi.invalidateCache('installments');
       }
-      
-      // CRITICAL: Clear cache on mount to ensure fresh data
-      // This prevents showing stale data after partial payments
-      console.log('🔄 Fees page mounted - clearing cache for fresh data');
-      hybridApi.invalidateCache('fees');
-      hybridApi.invalidateCache('installments');
       
       await fetchData();
     };
@@ -3003,7 +3004,8 @@ const Fees = () => {
                       checkDate: fee.checkDate,
                       bankNameArabic: fee.bankNameArabic,
                       bankNameEnglish: fee.bankNameEnglish,
-                      currency: CURRENCY
+                      currency: CURRENCY,
+                      skipApiCalls: true // Skip API calls during bulk generation for performance
                     };
                     
                     const htmlStartTime = Date.now();

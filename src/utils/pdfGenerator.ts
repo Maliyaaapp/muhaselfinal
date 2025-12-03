@@ -52,10 +52,10 @@ export const generateStudentInstallmentPDF = async (
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>${title}</title>
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap');
+      /* Use system fonts - no external font loading for faster PDF generation */
       
       body {
-        font-family: 'Tajawal', sans-serif;
+        font-family: 'Segoe UI', Arial, sans-serif;
         margin: 0;
         padding: 20px;
         background-color: #f5f5f5;
@@ -364,10 +364,10 @@ export const printPDF = async (
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>${title}</title>
       <style>
-        @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap');
+        /* Use system fonts - no external font loading for faster PDF generation */
         
         body {
-          font-family: 'Tajawal', sans-serif;
+          font-family: 'Segoe UI', Arial, sans-serif;
           margin: 0;
           padding: 20px;
           background-color: #f5f5f5;

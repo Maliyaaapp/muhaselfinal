@@ -587,15 +587,18 @@ const Installments = () => {
         clearRefreshNeeded('installments');
         
         // CRITICAL: Wait for database to fully commit before fetching
-        // This ensures we don't read stale cached data
-        console.log('[Installments] ⏳ Waiting 800ms for database to commit...');
-        await new Promise(resolve => setTimeout(resolve, 800));
+        console.log('[Installments] ⏳ Waiting 500ms for database to commit...');
+        await new Promise(resolve => setTimeout(resolve, 500));
         
-        // Clear ALL caches to force fresh fetch from Supabase
-        console.log('[Installments] 🗑️ Clearing all caches...');
+        // CRITICAL FIX: Force fresh fetch from Supabase
+        console.log('[Installments] 🗑️ Force fetching fresh data from Supabase...');
+        await hybridApi.forceFreshFetch('fees');
+        await hybridApi.forceFreshFetch('installments');
+        await hybridApi.forceFreshFetch('students');
+      } else {
+        // Normal mount - just invalidate cache (keeps localStorage as fallback)
         hybridApi.invalidateCache('installments');
         hybridApi.invalidateCache('fees');
-        await hybridApi.clearCache();
       }
       
       // Fetch data

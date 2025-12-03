@@ -798,6 +798,22 @@ export const clearCache = (tables?: string[]): void => {
   }
 };
 
+export const forceFreshFetch = async (table: string) => {
+  clearCachedCollection(table);
+  invalidateFilteredCaches(table);
+  try {
+    const { data, error } = await supabase.from(table).select('*');
+    if (!error && data) {
+      saveCachedCollection(table, data);
+      saveCollection(table, data);
+      return data;
+    }
+  } catch (err) {
+    console.warn(`Offline - using localStorage for ${table}`);
+  }
+  return getCollection(table);
+};
+
 // Set up event listeners for online/offline status
 if (typeof window !== 'undefined') {
   window.addEventListener('online', async () => {

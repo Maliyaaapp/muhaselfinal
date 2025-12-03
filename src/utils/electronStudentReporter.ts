@@ -55,13 +55,13 @@ export const generateStudentReportHTML = (data: StudentReportData): string => {
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>تقرير مالي للطالب - ${data.studentName}</title>
       <style>
-        @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap');
+        /* Use system fonts - no external font loading for faster PDF generation */
         
         * {
           box-sizing: border-box;
           margin: 0;
           padding: 0;
-          font-family: 'Tajawal', sans-serif;
+          font-family: 'Segoe UI', Arial, sans-serif;
         }
         
         @page {

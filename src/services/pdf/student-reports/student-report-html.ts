@@ -85,9 +85,8 @@ export const generateStudentReportHTML = (data: StudentReportData): string => {
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>التقرير المالي للطالب - ${data.studentName}</title>
-      <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
       <style>
-        @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap');
+        /* Use system fonts - no external font loading for faster PDF generation */
         
         * {
           box-sizing: border-box;
@@ -97,7 +96,7 @@ export const generateStudentReportHTML = (data: StudentReportData): string => {
         
         html, body {
           height: 100%;
-          font-family: 'Tajawal', Arial, sans-serif !important;
+          font-family: 'Segoe UI', Arial, sans-serif !important;
           line-height: 1.6;
           color: #333;
           background-color: #ffffff;
@@ -106,7 +105,7 @@ export const generateStudentReportHTML = (data: StudentReportData): string => {
         }
         
         .arabic-text {
-          font-family: 'Tajawal', Arial, sans-serif !important;
+          font-family: 'Segoe UI', Arial, sans-serif !important;
         }
         
         .report-container {
@@ -170,7 +169,7 @@ export const generateStudentReportHTML = (data: StudentReportData): string => {
           margin: 0;
           color: white;
           font-weight: 700;
-          font-family: 'Tajawal', sans-serif !important;
+          font-family: 'Segoe UI', Arial, sans-serif !important;
           text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
         }
         
@@ -196,13 +195,13 @@ export const generateStudentReportHTML = (data: StudentReportData): string => {
           color: #4A5568;
           margin-bottom: 5px;
           font-size: 14px;
-          font-family: 'Tajawal', sans-serif !important;
+          font-family: 'Segoe UI', Arial, sans-serif !important;
         }
         
         .metadata-value {
           font-weight: 500;
           color: #2D3748;
-          font-family: 'Tajawal', sans-serif !important;
+          font-family: 'Segoe UI', Arial, sans-serif !important;
         }
         
         /* Content wrapper with proper margins */
@@ -261,13 +260,13 @@ export const generateStudentReportHTML = (data: StudentReportData): string => {
           font-weight: 700;
           color: #1A365D; /* Dark blue for school name */
           margin-bottom: 8px;
-          font-family: 'Tajawal', sans-serif !important;
+          font-family: 'Segoe UI', Arial, sans-serif !important;
         }
         
         .school-contact {
           font-size: 12px;
           color: #4A5568; /* Darker gray for better readability */
-          font-family: 'Tajawal', sans-serif !important;
+          font-family: 'Segoe UI', Arial, sans-serif !important;
           font-weight: 500;
         }
         
@@ -288,7 +287,7 @@ export const generateStudentReportHTML = (data: StudentReportData): string => {
           font-size: 22px;
           color: #1A365D; /* Dark blue for consistency */
           font-weight: 700;
-          font-family: 'Tajawal', sans-serif !important;
+          font-family: 'Segoe UI', Arial, sans-serif !important;
         }
         
         .document-title:after {
@@ -327,11 +326,11 @@ export const generateStudentReportHTML = (data: StudentReportData): string => {
           color: #2D3748;
           margin-left: 8px;
           display: inline-block;
-          font-family: 'Tajawal', sans-serif !important;
+          font-family: 'Segoe UI', Arial, sans-serif !important;
         }
         
         .detail-value {
-          font-family: 'Tajawal', sans-serif !important;
+          font-family: 'Segoe UI', Arial, sans-serif !important;
           font-size: 15px;
           font-weight: 500;
           color: #1A365D; /* Dark blue for values */
@@ -348,7 +347,7 @@ export const generateStudentReportHTML = (data: StudentReportData): string => {
           background-color: ${statusColor};
           color: white;
           font-size: 18px;
-          font-family: 'Tajawal', sans-serif !important;
+          font-family: 'Segoe UI', Arial, sans-serif !important;
           box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         
@@ -367,7 +366,7 @@ export const generateStudentReportHTML = (data: StudentReportData): string => {
           width: 100%;
           border-collapse: collapse;
           background-color: white;
-          font-family: 'Tajawal', sans-serif !important;
+          font-family: 'Segoe UI', Arial, sans-serif !important;
         }
         
         .fees-table th {
@@ -427,7 +426,7 @@ export const generateStudentReportHTML = (data: StudentReportData): string => {
           font-weight: 600;
           margin-bottom: 10px;
           color: #4A5568;
-          font-family: 'Tajawal', sans-serif !important;
+          font-family: 'Segoe UI', Arial, sans-serif !important;
         }
         
         .signature-line {
@@ -450,7 +449,7 @@ export const generateStudentReportHTML = (data: StudentReportData): string => {
           background: linear-gradient(135deg, #1A365D 0%, #2C5282 100%); /* Match header gradient */
           color: white;
           border-top: 1px solid #E2E8F0;
-          font-family: 'Tajawal', sans-serif !important;
+          font-family: 'Segoe UI', Arial, sans-serif !important;
         }
         
         /* Responsive adjustments */

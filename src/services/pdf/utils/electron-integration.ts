@@ -43,7 +43,7 @@ export const downloadAsPDF = (
       .replace('<body', '<body class="arabic-text" dir="rtl"')
       .replace('</head>', `
         <style>
-          @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap');
+          /* Use system fonts - no external font loading for faster PDF generation */
           
           @page {
             size: ${isLandscape ? '297mm 210mm' : '210mm 297mm'};
@@ -51,7 +51,7 @@ export const downloadAsPDF = (
           }
           
           body {
-            font-family: 'Tajawal', Arial, sans-serif;
+            font-family: 'Segoe UI', Arial, sans-serif;
             direction: rtl;
             margin: 0;
             padding: 0;
@@ -60,7 +60,7 @@ export const downloadAsPDF = (
           
           /* Improved Arabic text rendering */
           .arabic-text {
-            font-family: 'Tajawal', Arial, sans-serif !important;
+            font-family: 'Segoe UI', Arial, sans-serif !important;
             text-align: right;
             direction: rtl;
           }
